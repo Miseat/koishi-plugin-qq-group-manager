@@ -1,0 +1,37 @@
+{
+  "name": "@nestim/koishi-plugin-qq-group-manager",
+  "description": "Koishi QQ群管理插件（OneBot/LLOneBot）：群管命令、权限校验、图片菜单、状态卡片、复读、AI群聊回复、记忆库、识图与自动管控（禁言/踢人）。",
+  "version": "0.1.5",
+  "main": "lib/index.js",
+  "typings": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "dist"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "rebuild": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "qq",
+    "group",
+    "onebot",
+    "llonebot",
+    "koishi",
+    "koishi-plugin",
+    "chatbot",
+    "moderation",
+    "memory",
+    "vision",
+    "ai"
+  ],
+  "devDependencies": {},
+  "peerDependencies": {
+    "koishi": "^4.18.7"
+  },
+  "koishi": {
+    "description": "QQ群管理插件（群管、自动管控、记忆、识图、AI回复）。"
+  }
+}
