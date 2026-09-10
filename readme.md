@@ -1,8 +1,55 @@
-﻿# koishi-qq-group-manager
+# koishi-qq-group-manager
 
-[![npm](https://img.shields.io/npm/v/%40meownestim%2Fkoishi-qq-group-manager?style=flat-square)](https://www.npmjs.com/package/@nestim/koishi-qq-group-manager)
+[![npm](https://img.shields.io/npm/v/%40nestim%2Fkoishi-qq-group-manager?style=flat-square)](https://www.npmjs.com/package/@nestim/koishi-plugin-qq-group-manager)
 
 QQ群管理插件（OneBot/LLOneBot）：群管命令、权限校验、图片菜单、状态卡片、复读、AI群聊回复、记忆库、识图与自动管控（禁言/踢人）。
+
+## v0.1.6 重点更新
+
+### 1. 识图彻底修复（此前完全不可用）
+
+早前版本的图片检测对 NapCat/Koishi 实际下发的消息结构**完全不匹配**，导致 AI 永远「看不到图」：
+
+| 旧实现假设 | 实际情况 |
+| --- | --- |
+| `session.content` 含 `[CQ:image,...]` | 实际是 HTML 形态 `<img src="..." summary="[动画表情]" sub-type="1"/>` |
+| 元素 `type === 'image'` | 实际是 `type === 'img'` |
+| 图片地址在 `url` / `src` | 实际在 `attrs.src` |
+| 表情包靠 `[CQ:face]` | 实际靠 `attrs.subType === 1` / `summary="[动画表情]"` |
+
+此外 `<img src>` 中的 `&amp;` 是 HTML 实体，**未解码直接请求必然 404**。
+
+修复后：
+- 新增统一视觉解析器，同时兼容 CQ 码、HTML `<img>`、element 三种形态，并自动解码 HTML 实体；
+- 图片会**下载并转为 base64 data URL** 再交给模型，不再依赖模型侧能否访问 QQ 图链（QQ 图链需 `rkey` 鉴权且有时效）；
+- 支持**「回复某张图片再 @bot」**：适配器已把被回复消息放在 `session.quote`，现在会从中取图；
+- 表情包（`subType=1`）同样会被识别与理解。
+
+### 2. 修复随机/阈值触发对纯图片、表情包无效
+
+- 纯图片/表情消息此前会被「无文本」守卫直接丢弃，现改为参与兴趣/阈值判定；
+- 兴趣判定提示词不再把「没有文字」等同于「无价值」，表情包/图片可作为正常互动被接话。
+
+### 3. 修复兴趣判定长期失效（`reason=empty`）
+
+`deepseek-flash` 等**带思考的模型**会先消耗 reasoning tokens。原兴趣判定只给 `max_tokens: 48`，额度被思考过程耗尽后正文为空，导致判定恒为 `score=0 reason=empty`、随机回复形同虚设。
+
+- 额度提升至 512（OpenAI 兼容与 Gemini 两条路径同步修复）；
+- 正文仍为空时，回退从 `reasoning_content` 中提取 JSON。
+
+### 4. 违禁词改为「整条消息评分」制
+
+原实现是逐词 `includes` 精确包含，广告把词隔开即可绕过（如 `领红包` 无法命中 `领xxx元红包`）。
+
+新机制：
+- **顺序子序列匹配**：关键词字符按序出现即命中，允许中间隔词；
+- **置信度**：按「词长归一化的间隔溢出」衰减，跨度超过词长 3 倍或溢出超过 8 字则判定为偶然凑齐、直接拒绝（可拦住 `领 导 强 调 红 色 包 装` 这类）；
+- **词长自适应门槛**：短词（2~4 字）需要更高置信度，降低无关文本误伤；
+- **可配置权重**：`"关键词|分值"` 形式，未指定时按内置分档表取值（显式广告词如 `扫码进群` 80 分，营销组合词如 `赚钱` 35 分）；
+- **整条消息累计得分 ≥ `bannedWordScoreThreshold`（默认 70）** 才触发管控（撤回/禁言/踢人），日志会输出命中明细与得分。
+
+> 局限说明：字符级匹配无法区分「字符顺序与间隔完全一致」的两个串。
+> 例如 `领xxx元红包`（广告）与 `领导说把红色包装袋收好`（正常）跨度均为 7、置信度均为 0.667，属于原理性边界，可通过调整阈值与权重缓解。
 
 ## 禁言指令优化（v0.0.4）
 
