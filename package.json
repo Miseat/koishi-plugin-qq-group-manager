@@ -1,7 +1,7 @@
 {
   "name": "@nestim/koishi-plugin-qq-group-manager",
   "description": "Koishi QQ群管理插件（OneBot/LLOneBot）：群管命令、权限校验、图片菜单、状态卡片、复读、AI群聊回复、记忆库、识图与自动管控（禁言/踢人）。",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [

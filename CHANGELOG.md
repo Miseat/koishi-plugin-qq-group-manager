@@ -2,6 +2,23 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.0.2
+
+### 修复
+
+- **恢复被误删的 5 个权限与日志方法**：`authorize`、`authorizeCommand`、
+  `canUseAdminCommand`、`logAuth`、`logCommandResult`。
+
+  这些方法在早期清理旧菜单死代码时被连带删除，导致 **1.0.0 / 1.0.1 中执行管理指令
+  或写日志时会抛 `TypeError: this.logCommandResult is not a function`**。
+  `canUseAdminCommand` 有 6 处调用、`logCommandResult` 有 12 处调用，因此影响面覆盖
+  权限校验与指令日志这些既有功能（新增功能测试未覆盖到，故此前未暴露）。
+
+  现已从 0.1.7 原文恢复，并补做**全量方法完整性校验**：
+  204 个方法定义 / 176 处 `this.xxx()` 调用，无缺失。
+
+- 建议所有使用 1.0.0 / 1.0.1 的部署升级到本版本。
+
 ## 1.0.0
 
 首个稳定版本。收敛此前所有群管能力，指令统一为方括号直连语法。
