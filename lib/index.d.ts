@@ -5,9 +5,6 @@ export declare const inject: {
 };
 export interface Config {
     command: string;
-    menuCommand: string;
-    replaceHelpAsImageMenu: boolean;
-    replaceStatusAsImage: boolean;
     platformFilter: string[];
     responseStyle: 'plain' | 'meow';
     dryRun: boolean;
@@ -52,6 +49,7 @@ export interface Config {
     repeaterEnableGetMsgRefetch: boolean;
     enableJoinRequestReview: boolean;
     joinRequestReviewTtlMinutes: number;
+    pendingJoinFileName: string;
     bannedWords: string[];
     blockCardMessage: boolean;
     blockForwardMessage: boolean;

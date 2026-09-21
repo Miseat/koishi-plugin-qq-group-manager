@@ -1,298 +1,133 @@
-# koishi-qq-group-manager
+# @nestim/koishi-plugin-qq-group-manager
 
-[![npm](https://img.shields.io/npm/v/%40nestim%2Fkoishi-qq-group-manager?style=flat-square)](https://www.npmjs.com/package/@nestim/koishi-plugin-qq-group-manager)
+[![npm version](https://img.shields.io/npm/v/%40nestim%2Fkoishi-plugin-qq-group-manager?style=flat-square)](https://www.npmjs.com/package/@nestim/koishi-plugin-qq-group-manager)
+[![license](https://img.shields.io/npm/l/%40nestim%2Fkoishi-plugin-qq-group-manager?style=flat-square)](./LICENSE)
 
-QQ群管理插件（OneBot/LLOneBot）：群管命令、权限校验、图片菜单、状态卡片、复读、AI群聊回复、记忆库、识图与自动管控（禁言/踢人）。
+Koishi 的 QQ 群管理插件（OneBot / NapCat / LLOneBot）。
 
-## v0.1.7 重点更新
+一套方括号直连指令 + 分级配置，覆盖群管动作、消息管控、自动处罚、记忆库、黑名单、
+入群审核、复读与 AI 群聊回复。**不依赖数据库**，状态以 Markdown 文件落盘，可直接在
+Koishi 控制台「探索器 Explorer」里查看和手改。
 
-### 1. AI 回复限定在「已单独配置的群」
+- 指令统一为 `[前缀] 参数` 形式，目标支持 QQ 号或 `@某人`
+- 所有指令名称为英文；菜单行首用中文标注功能名（如 `禁言 [mute] ...`）
+- 菜单是纯文本，**不依赖 puppeteer / 图片渲染**
+- 出问题可直接看 Koishi 数据目录里的 `.md` 文件，无需查库
 
-修复了一个权限漏洞：此前群未出现在 `groupRules` 时会**回落到全局 `enableAiReply`**，
-导致所有未配置的群也会触发 AI 回复。
+---
 
-现在默认要求「该群已单独配置」，可用 `aiReplyRequireGroupRule: false` 恢复旧的回落行为。
+## 功能
 
-### 2. 违禁词白名单（按群配置）
-
-用于校学生会招新这类场景：招新文案含「加群」「群号」等违禁词，但属于允许的宣传。
-
-```yaml
-groupRules:
-  - guildId: '1009320867'
-    whitelistKeywords:
-      - 宣传部
-      - 纪检部
-      - 办公室
-    whitelistOnlyOwners: false   # true 则仅群主/管理员可豁免
-```
-
-- 命中**任意一个**白名单关键词即整条跳过违禁词评分；
-- 只豁免违禁词，**卡片/合并转发的拦截不受影响**；
-- 仅在配置了白名单的群生效。
-
-### 3. 自定义命令
-
-检测到指定命令后输出预设消息，**完全不走 AI**。
-
-```yaml
-customCommands:
-  - trigger: '[签到]'              # 必须方括号包裹，完全匹配（忽略首尾空白）
-    replies:
-      - '签到成功！{at} 今天也要加油喵～'
-    enabled: true
-    groups: []                    # 留空=所有群；填群号=仅限这些群
-    randomReply: false            # 多条回复：随机 or 顺序轮换
-    quote: true                   # 引用触发的那条消息
-    cooldownSeconds: 0
-    logHit: true
-```
-
-- **完全匹配**：`[签到] 一下`、`签到`、`我要签到` 均**不触发**；
-- 变量占位符：`{user}` 昵称、`{at}` @发送者、`{group}` 群号；
-- 每条命令可独立配置随机/轮换、引用、限定群、冷却、日志。
-
-## v0.1.6 重点更新
-
-### 1. 识图彻底修复（此前完全不可用）
-
-早前版本的图片检测对 NapCat/Koishi 实际下发的消息结构**完全不匹配**，导致 AI 永远「看不到图」：
-
-| 旧实现假设 | 实际情况 |
+| 分组 | 能力 |
 | --- | --- |
-| `session.content` 含 `[CQ:image,...]` | 实际是 HTML 形态 `<img src="..." summary="[动画表情]" sub-type="1"/>` |
-| 元素 `type === 'image'` | 实际是 `type === 'img'` |
-| 图片地址在 `url` / `src` | 实际在 `attrs.src` |
-| 表情包靠 `[CQ:face]` | 实际靠 `attrs.subType === 1` / `summary="[动画表情]"` |
+| **群管动作** | 禁言 / 解除禁言 / 踢人（可拒绝其再次加群）；时长支持 `10`、`10m`、`1h`、`1d`、`1w`，上限 30 天 |
+| **权限校验** | 账号白名单 + 群主 / 群管理员；可要求 bot 为群主才放行管理动作 |
+| **消息管控** | 违禁词**整条消息评分制**（顺序模糊匹配 + 置信度衰减 + 可配权重），卡片消息、合并转发拦截，可自动撤回并群内提示 |
+| **按群覆盖** | `groupRules` 可为每个群单独设定违禁词、白名单关键词与各类开关，未配置则跟随全局 |
+| **自动处罚** | 统计窗口内累计违规达到阈值后自动禁言 / 自动踢人，阈值、时长、窗口均可配 |
+| **黑名单** | 按群独立存储（`banMember_<群号>.md`）；入群自动比对并踢出，可选踢人时自动记录 |
+| **入群审核** | 新申请推送到群内，管理员用 `approve` / `reject` 放行或拒绝；待审单落盘，**重启不丢** |
+| **记忆库** | `[memory]` 保存 / 列出 / 查询 / 删除，落盘 `Memory.md`；开启后 AI 回复会检索并引用相关记忆 |
+| **AI 群聊回复** | 阈值 / 随机 / 混合三种触发，多人格、点名直触发、点名后话题跟随、兴趣分判定、上下文窗口、温度与输出上限 |
+| **AI 识图** | 图片下载转 data URL 后送入模型，兼容 CQ 码 / HTML `<img>` / 元素三种形态与表情包 |
+| **复读** | 连续相同消息达阈值复读，支持图片引用回查；复读事件会进入 AI 上下文 |
+| **娱乐** | 自我约束（口球）与违规禁言惩罚，可开关与调节参数 |
 
-此外 `<img src>` 中的 `&amp;` 是 HTML 实体，**未解码直接请求必然 404**。
+## 安装
 
-修复后：
-- 新增统一视觉解析器，同时兼容 CQ 码、HTML `<img>`、element 三种形态，并自动解码 HTML 实体；
-- 图片会**下载并转为 base64 data URL** 再交给模型，不再依赖模型侧能否访问 QQ 图链（QQ 图链需 `rkey` 鉴权且有时效）；
-- 支持**「回复某张图片再 @bot」**：适配器已把被回复消息放在 `session.quote`，现在会从中取图；
-- 表情包（`subType=1`）同样会被识别与理解。
+```sh
+# npm
+npm i @nestim/koishi-plugin-qq-group-manager
 
-### 2. 修复随机/阈值触发对纯图片、表情包无效
-
-- 纯图片/表情消息此前会被「无文本」守卫直接丢弃，现改为参与兴趣/阈值判定；
-- 兴趣判定提示词不再把「没有文字」等同于「无价值」，表情包/图片可作为正常互动被接话。
-
-### 3. 修复兴趣判定长期失效（`reason=empty`）
-
-`deepseek-flash` 等**带思考的模型**会先消耗 reasoning tokens。原兴趣判定只给 `max_tokens: 48`，额度被思考过程耗尽后正文为空，导致判定恒为 `score=0 reason=empty`、随机回复形同虚设。
-
-- 额度提升至 512（OpenAI 兼容与 Gemini 两条路径同步修复）；
-- 正文仍为空时，回退从 `reasoning_content` 中提取 JSON。
-
-### 4. 违禁词改为「整条消息评分」制
-
-原实现是逐词 `includes` 精确包含，广告把词隔开即可绕过（如 `领红包` 无法命中 `领xxx元红包`）。
-
-新机制：
-- **顺序子序列匹配**：关键词字符按序出现即命中，允许中间隔词；
-- **置信度**：按「词长归一化的间隔溢出」衰减，跨度超过词长 3 倍或溢出超过 8 字则判定为偶然凑齐、直接拒绝（可拦住 `领 导 强 调 红 色 包 装` 这类）；
-- **词长自适应门槛**：短词（2~4 字）需要更高置信度，降低无关文本误伤；
-- **可配置权重**：`"关键词|分值"` 形式，未指定时按内置分档表取值（显式广告词如 `扫码进群` 80 分，营销组合词如 `赚钱` 35 分）；
-- **整条消息累计得分 ≥ `bannedWordScoreThreshold`（默认 70）** 才触发管控（撤回/禁言/踢人），日志会输出命中明细与得分。
-
-> 局限说明：字符级匹配无法区分「字符顺序与间隔完全一致」的两个串。
-> 例如 `领xxx元红包`（广告）与 `领导说把红色包装袋收好`（正常）跨度均为 7、置信度均为 0.667，属于原理性边界，可通过调整阈值与权重缓解。
-
-## 禁言指令优化（v0.0.4）
-
-`群管 mute` 不再依赖固定顺序解析参数，改为智能解析，避免「禁言时长被识别成 QQ 号」：
-
-- 目标优先取 `@用户`（支持群内 @ 及 `[CQ:at]`），再考虑文本中的 QQ 号；
-- 时长支持多种写法：`10`（分钟）、`10分钟` / `10分` / `10min` / `10m`、`1小时` / `1时` / `1h`、`1天` / `1d`、`1周` / `1w`；
-- 兼容「先时长后 QQ」的输入（如 `群管 mute 30 123456`），会自动与群成员比对纠正目标；
-- 缺少目标或时长时会给出明确提示与示例，不再静默把数字当 QQ 号处理；
-- 时长上限 30 天（43200 分钟），超出部分按 30 天处理并在结果中提示。
-
-示例：
-
-```
-群管 mute @用户 10            # 10 分钟
-群管 mute 123456 30分钟        # QQ 123456 禁言 30 分钟
-群管 mute @用户 1小时 -r 刷屏   # 1 小时，附原因
-群管 unmute @用户              # 解除禁言
+# 或在 Koishi 控制台「插件市场」搜索 qq-group-manager 安装
 ```
 
-## 自动管控（v0.0.4 新增）
+依赖 `koishi >= 4.18.7`，需要 OneBot 实现（NapCat / LLOneBot 等）提供
+`setGroupBan` / `setGroupKick` / `getGroupMemberInfo` 等接口。
 
-成员在群内触发违规（命中违禁词 / 卡片消息 / 合并转发，行为沿用「消息管控」既有配置）后，插件会按群统计违规次数，达到阈值自动处理：
+## 指令
 
-- **自动禁言**：累计违规达到阈值 → 按设定时长禁言；
-- **自动踢人**：累计违规达到更高阈值 → 自动移出群聊并清零计数；
-- 计数采用滑动窗口（默认 60 分钟）：窗口内连续违规才累计，超时未违规则重新计数；
-- 白名单账号、群主、群管理员、bot 自身不会触发自动禁言/踢人（消息撤回与提示仍按原逻辑执行）；
-- 自动处理后若开启「违规群内提示」，会在群内公告处理结果；所有判定均写入插件日志。
+所有指令都是 `[前缀] 参数`，目标既可以是 QQ 号，也可以是 `@某人`。
+单独发送 `[bot]` 查看菜单。
 
-全局默认设置（插件配置 →「自动管控」）：
+| 指令 | 说明 |
+| --- | --- |
+| `[mute] QQ 时长 [原因]` | 禁言。时长 `10` / `10m` / `1h` / `1d` / `1w`，上限 30 天 |
+| `[unmute] QQ [原因]` | 解除禁言 |
+| `[kick] QQ [原因]` | 移出群聊（可拒绝其再次加群请求，并记入黑名单） |
+| `[memory] 内容` | 保存一条记忆 |
+| `[memory] list` | 列出最近 10 条记忆 |
+| `[memory] search 关键词` | 查询记忆（`query` / `find` 同义） |
+| `[memory] delete 关键词` | 删除含该关键词的记忆（`del` 同义） |
+| `[ban] QQ [原因]` | 加入本群黑名单 |
+| `[unban] QQ [原因]` | 移出本群黑名单 |
+| `[banlist]` | 列出本群黑名单 |
+| `[custom]` | 列出自定义指令；没有配置时提示「目前还没有指令。」 |
+| `[bot]` | 查看指令菜单 |
 
-| 配置项 | 默认值 | 说明 |
+**入群审核**：新申请会在群里收到带 6 位编号的提示，管理员直接发文本处理：
+
+- 放行：`approve [编号] [理由]`
+- 拒绝：`reject [编号] [理由]`
+
+编号可省略，省略时取当前群最近一条待审申请。
+
+## 配置分组
+
+插件配置页按以下分组组织（共 11 组）：
+
+`基础设置` · `消息管控` · `自动管控` · `记忆库` · `黑名单` ·
+`娱乐设置` · `群聊互动` · `自定义命令` · `AI 回复` · `权限设置` · `日志设置`
+
+几个常用项：
+
+| 配置 | 默认 | 说明 |
 | --- | --- | --- |
-| `enableAutoMute` | false | 是否启用自动禁言 |
-| `autoMuteViolationThreshold` | 3 | 触发自动禁言的违规次数 |
-| `autoMuteMinutes` | 10 | 自动禁言时长（分钟） |
-| `enableAutoKick` | false | 是否启用自动踢人 |
-| `autoKickViolationThreshold` | 5 | 触发自动踢人的违规次数 |
-| `autoViolationWindowMinutes` | 60 | 违规计数统计窗口（分钟） |
+| `command` | `[bot]` | 菜单入口前缀 |
+| `allowedUserIds` | `[]` | 可直接使用管理指令的账号白名单 |
+| `bannedWords` | `[]` | 违禁词；支持 `关键词\|分值` 自定义权重 |
+| `bannedWordScoreThreshold` | `70` | 违禁词评分触发阈值 |
+| `groupRules` | `[]` | 按群覆盖策略（违禁词、白名单关键词、AI 开关、自动处罚阈值等） |
+| `memoryFileName` | `Memory.md` | 记忆库文件名（存放在 Koishi 数据目录） |
+| `blacklistFileName` | `banMember.md` | 黑名单文件名模板，实际为 `banMember_<群号>.md` |
+| `pendingJoinFileName` | `JoinRequests.md` | 待审入群申请落盘文件名 |
+| `enableJoinRequestReview` | `true` | 是否发起入群审核 |
+| `enableAiReply` | `false` | AI 回复总开关（建议配合 `aiReplyRequireGroupRule` 逐群开启） |
+| `aiReplyRequireGroupRule` | `true` | 仅对已在 `groupRules` 中单独配置的群启用 AI 回复 |
+| `dryRun` | `false` | 演练模式：只输出计划动作，不真正执行 |
 
-按群单独设置：在插件配置 →「消息管控」→ `groupRules` 中为某个群新增一条记录并填写 `autoMuteEnabled` / `autoMuteThreshold` / `autoMuteMinutes` / `autoKickEnabled` / `autoKickThreshold` / `autoViolationWindowMinutes`，即可覆盖全局设置；留空则跟随全局。
+## AI 回复与识图
 
-## 记忆库（v0.0.4+）
+- **接口**：`openai-compatible`（OpenAI 兼容 Chat Completions）与 `gemini`（原生 `generateContent`）两类。
+- **触发**：`threshold`（累计消息达阈值）、`random`（按概率）、`hybrid`（两者同时生效）；
+  消息中命中智能体自称或直接 `@bot` 时忽略阈值直接触发。
+- **多人格**：`aiPersonas` 保存多套「自称 + 系统提示词」，用 `aiActivePersona` 切换。
+- **识图**：开启 `aiEnableImageRecognition` 后，图片会下载并转为 data URL 再送入模型，
+  不依赖模型侧访问 QQ 图链；兼容 CQ 码、HTML `<img>`、消息元素与表情包。
 
-通过群聊指令维护一份 `Memory.md`（默认存储在 Koishi 数据目录），充当长期记忆库；
+## 数据文件
 
-- **保存**：`[记忆]+内容`（如 `[记忆] 小明的生日是2000年6月`），自动带上时间与用户写入 `Memory.md`，每条记忆之间用 `---` 分隔。
-- **查询**：`[记忆查询] 关键词`（无关键词则列出最近几条）。
-- **列表**：`[记忆列表]`（列出最近记忆）。
-- **删除**：`[记忆删除] 关键词`（删除所有包含该关键词的记忆）。
-- **供 AI 引用**：开启 `memoryInAi` 后，AI 回复与识图时会检索相关记忆并注入上下文（相关才引用，不编造）。
-- **查看/编辑**：在 Koishi 控制台左侧「Explorer（探索器）」里打开 `Memory.md`，可直接查看和手动增删改。
+均存放在 Koishi 数据目录（`ctx.baseDir`），可用控制台「探索器 Explorer」直接查看与编辑：
 
-全局开关：插件配置 →「记忆库」→ `enableMemory` / `memoryFileName` / `memoryInAi`。
-
-## AI 识图（v0.0.4+）
-
-- 识图走 OpenAI 兼容接口的 `image_url` 格式（`deepseek-v4-flash-vision-exp` 等支持视觉的模型可用）。
-- 图片来源要求：`[CQ:image,url=http(s)://...]` 或图片元素中的 http(s)/`data:image/` 链接；若 LLOneBot 只给了 `file=`/`file_id` 本地路径（无 http 链接），则无法直接识别。
-- 调试：
-  - 群内发送 `群管 查图`（可附一张图），会显示这条消息里识别到的图片数量与链接/原始字段；
-  - 发送图片并 `@bot` 时，若检测到图片但提取不到可发送链接，会写 `[img-debug]` 日志。
-- 前提：`aiEnableImageRecognition` 为 true、`aiImageMaxCount > 0`，且所用模型支持视觉输入。
-
-## 当前状态
-
-已完成插件框架初始化，包含：
-
-- `Config` 配置模型
-- `QQGroupManagerService` 服务层
-- `群管` 命令入口（`ping` / `plan`）
-- 预留的群动作计划类型定义
-- 权限校验框架（账号白名单 + 群主/群管理员）
-- 基础群管理动作（踢人 / 禁言 / 设管理员）
-- 指令日志输出（鉴权日志 + 执行结果日志）
-- Meow 图片菜单（可选接管 help）
-
-## 目录结构
-
-```txt
-src/
-  index.ts      # 插件入口与配置
-  service.ts    # 管理服务与未来业务逻辑入口
-  commands.ts   # 命令注册
-  types.ts      # 通用类型定义
-```
+| 文件 | 内容 |
+| --- | --- |
+| `Memory.md` | 记忆库，条目之间以 `---` 分隔 |
+| `banMember_<群号>.md` | 各群黑名单，`## QQ号 · 备注` + 加入时间 |
+| `JoinRequests.md` | 待审入群申请（人类可读表格 + 机器可读区段），重启自动恢复、过期自动清理 |
 
 ## 权限模型
 
-- `allowedUserIds`: 账号白名单，命中后直接通过。
-- 非白名单账号：在群聊上下文里，若为群主或群管理员可通过（可配置开关）。
-- `admin` 子命令可配置为仅在 bot 为当前群群主时可用（`requireBotOwnerForAdmin`）。
+- `allowedUserIds` 命中即通过；
+- 非白名单账号：在群聊中若为群主或群管理员可通过（可用 `allowGroupOwner` / `allowGroupAdmin` 关闭）；
+- `requireBotOwnerForAdmin` 可要求 bot 本身是该群群主才放行管理动作；
+- 白名单目标默认受禁言保护，`allowAdminBypassWhitelistMute` 决定群主/管理员能否绕过。
 
-## 日志与输出
+鉴权细节与指令执行结果只写日志，不回显到群聊。
 
-- 鉴权细节（白名单/群主/管理员判定）只写入日志，不回显到群聊。
-- 指令执行结果会写入插件日志（可配置开关）。
-- `dryRun` 默认关闭（`false`），开启后仅输出计划动作不实际执行。
+## 更新日志
 
-## 菜单功能
+见 [CHANGELOG.md](./CHANGELOG.md)。
 
-- `menuCommand`: 菜单指令名（默认 `菜单`）。
-- `replaceHelpAsImageMenu`: 开启后接管 `help`，返回全插件图片菜单。
-- `replaceStatusAsImage`: 开启后接管 `status`，返回 Meow 风格状态图片（CPU/内存）。
-- 在 OneBot 群聊上下文下，`status` 会额外尝试读取 LLOneBot/OneBot `getStatus()` 并展示在线与统计信息。
-- 图片渲染依赖 `puppeteer`，未启用时会回退文本提示。
-- 分级菜单：
-  - `help` / `菜单`：仅显示父指令分类（如 `群管菜单`）。
-  - `help <父指令菜单>` / `菜单 <父指令菜单>`：显示该分类下子指令。
-  - 也可直接输入父指令（如 `群管`）直接查看该分类菜单。
-  - 用户发送 `help`/`菜单` 后 30 秒内，下一条消息会自动作为菜单关键词配对解析（用于补偿直接发送 `群管菜单` 等触发不稳定场景）。
-- 无父指令的命令会被归入 `其它菜单` 分类。
+## License
 
-## 群消息管控
-
-- `bannedWords`: 违禁词列表（可在配置页直接维护）。
-- `blockCardMessage`: 是否禁止卡片消息（OneBot `json/xml`）。
-- `blockForwardMessage`: 是否禁止合并转发消息（OneBot `forward`）。
-- `autoDeleteViolation`: 违规后是否自动撤回消息。
-- `sendViolationNotice`: 违规后是否在群内发送提示。
-- `groupRules`: 按群聊覆盖上述策略（每个群可配置不同选项）。
-- `groupRules.enableAiReply`: 可按群覆盖 AI 回复开关（留空则继承全局）。
-- 自动禁言 / 自动踢人：见上方「自动管控」一节，支持全局与按群配置。
-
-## 群聊互动
-
-- `enableRepeater`: 启用复读功能。
-- `repeaterThreshold`: 连续相同消息触发阈值（默认 3）。
-- `repeaterCooldownSeconds`: 同一内容复读冷却（秒）。
-- `repeaterEnableGetMsgRefetch`: 当图片消息缺少可发送引用时，通过 OneBot `get_msg` 回查原消息提取 `url/file/id` 后再发送（默认开启）。
-- `enableJoinRequestReview`: 启用后自动监听新入群申请并在群内发起审核。
-- `joinRequestReviewTtlMinutes`: 审核编号有效期（分钟，默认 30）。
-- 触发后 bot 会复读文本与图片（如有），并将“复读触发事件”写入 AI 上下文供后续回复参考。
-- 新入群申请会自动推送到群聊，管理员可通过命令或快捷文本进行放行/拒绝。
-
-## AI 自动回复
-
-- 支持两类接口：
-  - `openai-compatible`：OpenAI 兼容 Chat Completions（可用于 OpenAI、火山引擎、Codex API/Auth 等兼容网关）。
-  - `gemini`：Google Gemini 原生 `generateContent` 接口。
-- 主要配置项：
-  - `enableAiReply`：总开关。
-  - `aiProvider` / `aiBaseUrl` / `aiApiKey` / `aiModel`：模型接入参数。
-  - `aiAgentName`：默认智能体自称。
-  - `aiSystemPrompt`：默认系统提示词。
-  - `aiPersonas` / `aiActivePersona`：多人格配置与切换（可为每个人格设置独立自称与提示词）。
-  - `aiReplyMode`：`threshold` / `random` / `hybrid`。
-  - `aiMessageThreshold`：累计消息触发阈值。
-  - `aiRandomReplyProbability`：随机触发概率。
-  - `aiMinReplyIntervalSeconds`：同群最短回复间隔。
-  - `aiContextWindow`：送入模型的最近消息窗口。
-  - `aiTemperature` / `aiMaxOutputTokens`：生成参数。
-  - `aiEnableImageRecognition` / `aiImageMaxCount`：图片识别开关与单次识别图片上限。
-  - `aiIgnoreCommandMessage`：忽略命令样式消息，避免影响正常指令流程。
-  - `aiEnableDirectMentionTrigger`：是否启用“点名智能体名即强制触发”。
-  - `aiEnableFollowupAfterMention` / `aiFollowupWindowSeconds` / `aiFollowupMaxTurns`：点名后同用户跟随回复配置。
-  - `aiOwnerPlatform` / `aiOwnerUserId`：主人身份标识（默认 `onebot + QQ号` 形式）。
-  - `aiHomePlatform` / `aiHomeUserId`：兼容旧字段，建议迁移到 `aiOwner*`。
-  - `aiInterestMinScore`：非点名场景 AI 兴趣触发最低分（越高越冷静）。
-  - `aiInterestContextWindow`：非阈值兴趣判定读取的上下文条数（默认 8，范围 4~16）。
-- 触发逻辑：
-  - 达到阈值后触发；非阈值场景由 AI 兴趣判定触发（不再依赖概率随机）。
-  - 非阈值兴趣判定会读取近期上下文，不再只看单条消息。
-  - 当消息中命中当前生效的智能体自称（或直接 `@bot`）时，会忽略累计阈值直接触发，并基于该消息及近期上下文回复。
-  - 点名触发不会重置阈值计数，阈值累计继续生效。
-  - 点名触发时会优先只回应点名那条消息，不会转去回答其他上下文消息。
-  - 点名后会进入“话题跟随窗口”，优先判断点名者后续消息；同时允许主人或上下文中的相关追问者对同话题接续提问。
-  - 阈值触发时会先进行兴趣判定，若兴趣分不足可跳过发言（仅日志记录）。
-  - 点名消息若包含图片，会尝试进行图片识别后再回复（OpenAI 兼容接口为原生图文输入；Gemini 模式回退为图片链接辅助识别）。
-  - 点名触发时输出单条正常回复，不额外附加总结文本，减少 token 消耗。
-  - 阈值模式会强调“优先回复选定目标消息”，并压缩上下文范围降低错位回复概率。
-  - 发送结果与错误信息仅写入插件日志（`cmd:ai-reply`）。
-
-## 命令（首版）
-
-- `群管 ping`
-- `菜单 [关键词]`
-- `群管 plan <groupId>`
-- `群管 kick <qq号|@用户> [-r] [-m 原因]`
-- `群管 mute <qq号|@用户> <时长>`（时长支持 `10`、`10分钟`、`1小时`、`1天` 等写法，见上文）
-- `群管 gag [qq号|@用户]` / `群管 口球 [qq号|@用户]`
-- `群管 unmute <qq号|@用户> [-r 原因]`
-- `群管 admin <qq号|@用户> [on|off] [-r 原因]`
-- `群管 审核 <编号> <同意|拒绝> [-r 理由]`
-
-收到新入群申请后，群内会收到审核提示，支持两种处理方式：
-
-- 命令：`群管 审核 <编号> 同意` / `群管 审核 <编号> 拒绝`
-- 快捷文本：`同意入群 <编号>` / `拒绝入群 <编号>`
-
-普通成员在群聊中将 `mute`/`gag` 目标指向自己时，会忽略时长与规则，随机触发 1~60 分钟口球禁言。
-该功能可在控制页「娱乐设置」通过 `enableSelfGag` 开关启停。
-
-- 白名单用户不会触发口球娱乐逻辑。
-- 白名单目标默认受禁言保护；可通过 `allowAdminBypassWhitelistMute` 控制是否允许群主/管理员绕过保护执行禁言。
-- 普通成员反复尝试对他人执行禁言时，会触发惩罚：随机 1~10 分钟禁言本人。
-  - 该行为可配置：`enableUnauthorizedMutePunish`、`unauthorizedMuteAttemptThreshold`、`unauthorizedMuteWindowMinutes`、`unauthorizedMutePunishMinMinutes`、`unauthorizedMutePunishMaxMinutes`。
+MIT
