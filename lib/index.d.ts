@@ -51,6 +51,7 @@ export interface Config {
     joinRequestReviewTtlMinutes: number;
     pendingJoinFileName: string;
     bannedWords: string[];
+    strongKeywords: string[];
     blockCardMessage: boolean;
     blockForwardMessage: boolean;
     autoDeleteViolation: boolean;
@@ -82,6 +83,7 @@ export interface GroupRule {
     guildId: string;
     enableAiReply?: boolean;
     bannedWords: string[];
+    strongKeywords?: string[];
     blockCardMessage: boolean;
     blockForwardMessage: boolean;
     autoDeleteViolation: boolean;

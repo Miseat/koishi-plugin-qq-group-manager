@@ -23,7 +23,8 @@ Koishi 控制台「探索器 Explorer」里查看和手改。
 | **群管动作** | 禁言 / 解除禁言 / 踢人（可拒绝其再次加群）；时长支持 `10`、`10m`、`1h`、`1d`、`1w`，上限 30 天 |
 | **权限校验** | 账号白名单 + 群主 / 群管理员；可要求 bot 为群主才放行管理动作 |
 | **消息管控** | 违禁词**整条消息评分制**（顺序模糊匹配 + 置信度衰减 + 可配权重），卡片消息、合并转发拦截，可自动撤回并群内提示 |
-| **按群覆盖** | `groupRules` 可为每个群单独设定违禁词、白名单关键词与各类开关，未配置则跟随全局 |
+| **强关键词** | `strongKeywords`：命中即可触发管控，且**无视白名单豁免**，堵住「附一个白名单词即可绕过管控」的口子；判定顺序为 强关键词 → 白名单 → 普通违禁词 |
+| **按群覆盖** | `groupRules` 可为每个群单独设定违禁词、强关键词、白名单关键词与各类开关，未配置则跟随全局 |
 | **自动处罚** | 统计窗口内累计违规达到阈值后自动禁言 / 自动踢人，阈值、时长、窗口均可配 |
 | **黑名单** | 按群独立存储（`banMember_<群号>.md`）；入群自动比对并踢出，可选踢人时自动记录 |
 | **入群审核** | 新申请推送到群内，管理员用 `approve` / `reject` 放行或拒绝；待审单落盘，**重启不丢** |
@@ -87,8 +88,9 @@ npm i @nestim/koishi-plugin-qq-group-manager
 | `command` | `[bot]` | 菜单入口前缀 |
 | `allowedUserIds` | `[]` | 可直接使用管理指令的账号白名单 |
 | `bannedWords` | `[]` | 违禁词；支持 `关键词\|分值` 自定义权重 |
-| `bannedWordScoreThreshold` | `70` | 违禁词评分触发阈值 |
-| `groupRules` | `[]` | 按群覆盖策略（违禁词、白名单关键词、AI 开关、自动处罚阈值等） |
+| `bannedWordScoreThreshold` | `70` | 违禁词评分触发阈值（强关键词共用） |
+| `strongKeywords` | `[]` | 强关键词；命中即触发且**无视白名单豁免**，支持 `关键词\|分值` |
+| `groupRules` | `[]` | 按群覆盖策略（违禁词、强关键词、白名单关键词、AI 开关、自动处罚阈值等） |
 | `memoryFileName` | `Memory.md` | 记忆库文件名（存放在 Koishi 数据目录） |
 | `blacklistFileName` | `banMember.md` | 黑名单文件名模板，实际为 `banMember_<群号>.md` |
 | `pendingJoinFileName` | `JoinRequests.md` | 待审入群申请落盘文件名 |
@@ -124,10 +126,6 @@ npm i @nestim/koishi-plugin-qq-group-manager
 - 白名单目标默认受禁言保护，`allowAdminBypassWhitelistMute` 决定群主/管理员能否绕过。
 
 鉴权细节与指令执行结果只写日志，不回显到群聊。
-
-## 更新日志
-
-见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## License
 
