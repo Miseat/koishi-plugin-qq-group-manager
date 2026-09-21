@@ -64,6 +64,7 @@ npm i @nestim/koishi-plugin-qq-group-manager
 | `[banlist]` | 列出本群黑名单 |
 | `[custom]` | 列出自定义指令；没有配置时提示「目前还没有指令。」 |
 | `[bot]` | 查看指令菜单 |
+| `[Version]` | 查看插件信息（当前版本、作者、GitHub 与 npm 地址）|
 
 **入群审核**：新申请会在群里收到带 6 位编号的提示，管理员直接发文本处理：
 
