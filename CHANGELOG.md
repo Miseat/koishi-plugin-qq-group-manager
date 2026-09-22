@@ -2,6 +2,33 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.1.2
+
+### 修复
+
+- **兴趣判定静默失效（`finish_reason=length`）**。兴趣判定调用的 `max_tokens` 原先硬编码为
+  `512`，而带思考的推理模型（如 `deepseek-flash`）会先消耗 reasoning token：
+  512 的额度可能被推理全部吃掉，导致 `content` 为空、`finish_reason=length`，
+  判定直接返回 `score=0 / 不回复`。
+
+  实测 12 小时内触发 **13 次**，连「学习部的介绍好用心，想练文案的同学可以冲」这类
+  明显该接话的消息也被静默拒绝。由于失败被当成「不回复」，界面上完全看不出来。
+
+  现在默认额度提升到 **2048**，并可通过 `aiInterestMaxTokens` 调整（范围 256~16384）。
+  失败日志也会带上额度与模型名，便于定位：
+
+  ```
+  [ai-interest] 判定返回空内容 finish=length reasoningTokens=512/2048 model=deepseek-flash
+  ```
+
+### 新增
+
+- **`aiInterestModel`**：可为兴趣判定单独指定模型，留空则沿用 `aiModel`。
+  兴趣判定只是二分类任务，指向非推理的轻量模型（如 `deepseek-chat`）可显著降低
+  耗时与成本——这是本问题的根因规避方案。
+- **`aiInterestMaxTokens`**：兴趣判定的最大输出 token，默认 `2048`。
+  OpenAI 兼容路径写入 `max_tokens`，Gemini 路径写入 `maxOutputTokens`，两条路径同时生效。
+
 ## 1.1.1
 
 ### 修复

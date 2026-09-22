@@ -110,6 +110,10 @@ npm i @nestim/koishi-plugin-qq-group-manager
   `hybrid` 表示**两者都需满足**（先够消息数，再掷中概率）。消息中命中智能体自称或直接 `@bot` 时，
   越过上述全部闸门直接触发。
 - **多人格**：`aiPersonas` 保存多套「自称 + 系统提示词」，用 `aiActivePersona` 切换。
+- **兴趣判定**：`aiInterestModel` 可为这一步单独指定模型（留空沿用 `aiModel`）。
+  兴趣判定只是二分类，用非推理的轻量模型可显著降低耗时与成本。
+  `aiInterestMaxTokens`（默认 2048）控制其最大输出 token——**带思考的推理模型会先消耗
+  reasoning token，额度太小会让正文为空、判定静默失效**。
 - **识图**：开启 `aiEnableImageRecognition` 后，图片会下载并转为 data URL 再送入模型，
   不依赖模型侧访问 QQ 图链；兼容 CQ 码、HTML `<img>`、消息元素与表情包。
 

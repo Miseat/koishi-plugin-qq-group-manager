@@ -43,6 +43,8 @@ export interface Config {
     aiHomeUserId: string;
     aiInterestMinScore: number;
     aiInterestContextWindow: number;
+    aiInterestModel: string;
+    aiInterestMaxTokens: number;
     enableRepeater: boolean;
     repeaterThreshold: number;
     repeaterCooldownSeconds: number;
