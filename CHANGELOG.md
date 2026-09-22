@@ -2,6 +2,41 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.1.1
+
+### 修复
+
+- **`aiRandomReplyProbability` 此前完全未生效**。该配置项只出现在 Schema 定义与类型声明中，
+  `service.js` 从未读取它——无论填 `0`、`0.15` 还是 `1`，触发结果完全一致。现已真正接入。
+
+### 变更
+
+- **AI 回复改为三道闸门逐层判定**，任一不过都不回复，且不会产生后续的模型调用：
+
+  | 闸门 | 配置项 | 生效模式 | 作用 |
+  | --- | --- | --- | --- |
+  | ① 消息阈值 | `aiMessageThreshold` | `threshold` / `hybrid` | 累计消息数未达阈值一律不触发 |
+  | ② 随机概率 | `aiRandomReplyProbability` | `random` / `hybrid` | 每条消息掷一次骰，未掷中直接跳过 |
+  | ③ 兴趣评分 | `aiInterestMinScore` | 非点名场景 | 调模型打分，达标才真正回复 |
+
+- **`hybrid` 语义由「任一满足」改为「两者都需满足」**：先累计到阈值，再按概率掷中。
+  此前 `hybrid` 在未达阈值时会无条件放行（返回 `interest-check`），等于阈值形同虚设。
+
+- **兴趣判定闸门统一**：此前只对「兴趣判定」与「阈值触发」两条路径生效，
+  现改为所有非点名触发（阈值 / 概率）都要过兴趣评分。
+  `@点名` 与点名后跟随（followup）仍可越过全部三道闸门。
+
+- 触发原因日志更明确：`below-threshold(n/N)`、`random-miss(p)`、`random-disabled`、
+  `threshold(n/N)+random(p)`、`random(p)`，便于排查「为什么没回复」。
+
+### 影响与调参提示
+
+- 升级后 AI 回复频率会明显下降，`hybrid` 模式下尤其明显。
+- **若配置中未设置 `aiRandomReplyProbability`，将回落到 Schema 默认值 `0.08`。**
+  该值原先不起作用，升级后会立即生效，建议据此重新调参。
+  想让 AI 更活跃可切到 `random` 模式并调高概率，或降低 `aiMessageThreshold`。
+- 附带收益：未通过前两道闸门的消息不再触发兴趣判定模型调用，**API 调用量大幅下降**。
+
 ## 1.1.0
 
 ### 新增
