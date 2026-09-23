@@ -129,9 +129,12 @@ npm i @nestim/koishi-plugin-qq-group-manager
 
 ## 权限模型
 
-- `allowedUserIds` 命中即通过；
-- 非白名单账号：在群聊中若为群主或群管理员可通过（可用 `allowGroupOwner` / `allowGroupAdmin` 关闭）；
-- `requireBotOwnerForAdmin` 可要求 bot 本身是该群群主才放行管理动作；
+群管指令（`[mute]` `[unmute]` `[kick]` `[ban]` `[unban]` `[banlist]`）采用**两步鉴权**：
+
+1. **操作者身份**：`allowedUserIds` 命中即通过；否则要求是群主（`allowGroupOwner`）或群管理员（`allowGroupAdmin`）。
+2. **执行能力**：`requireBotOwnerForAdmin` 开启时，要求 bot 在该群是群主或管理员，否则无法执行。
+
+- 两步都通过才放行。
 - 白名单目标默认受禁言保护，`allowAdminBypassWhitelistMute` 决定群主/管理员能否绕过。
 
 鉴权细节与指令执行结果只写日志，不回显到群聊。
