@@ -139,6 +139,130 @@ npm i @nestim/koishi-plugin-qq-group-manager
 
 鉴权细节与指令执行结果只写日志，不回显到群聊。
 
+---
+
+## English
+
+A QQ group-management plugin for [Koishi](https://koishi.chat) (OneBot / NapCat / LLOneBot).
+
+Bracket-style commands plus layered per-group configuration. Covers moderation actions,
+message filtering, automatic punishment, a memory store, blacklists, join-request review,
+repeat (echo) and AI group-chat replies. **No database required** — all state is persisted
+as Markdown files that you can read and edit directly in the Koishi console (Explorer).
+
+- Commands use a uniform `[prefix] args` form; targets accept a QQ number or `@mention`
+- Command names are English; menu lines are labelled in Chinese (e.g. `禁言 [mute] ...`)
+- Menus are plain text — **no puppeteer / image rendering**
+- Troubleshooting means opening the `.md` files in the Koishi data directory, no DB queries
+
+### Features
+
+| Group | Capability |
+| --- | --- |
+| **Moderation** | Mute / unmute / kick (optionally rejecting future join requests). Durations `10`, `10m`, `1h`, `1d`, `1w`, capped at 30 days |
+| **Authorization** | Account allowlist plus group owner / admin checks; can require the bot itself to hold owner or admin rights |
+| **Message filtering** | Whole-message scoring for banned words (fuzzy ordered matching, confidence decay, per-word weights); intercepts card messages and merged forwards; optional auto-recall with a group notice |
+| **Strong keywords** | `strongKeywords` triggers moderation on match and **ignores allowlist exemptions**, closing the "append an allowlisted word to bypass" hole. Evaluation order: strong keyword → allowlist → banned word |
+| **Per-group overrides** | `groupRules` sets banned words, strong keywords, allowlist keywords and toggles per group; unset values fall back to global |
+| **Auto punishment** | Accumulated violations inside a window reaching a threshold trigger auto-mute / auto-kick; threshold, duration and window are all configurable |
+| **Blacklist** | Stored per group (`banMember_<groupId>.md`); join requests are matched automatically and rejected |
+| **Join review** | New requests are pushed to the group; admins use `approve` / `reject`. Pending requests are persisted and **survive restarts** |
+| **Memory store** | `[memory]` save / list / search / delete into `Memory.md`; when enabled, AI replies retrieve and cite relevant memories |
+| **AI replies** | Three sequential gates: ① message threshold ② random probability ③ interest scoring. Failing any gate means no reply and no model call; an `@mention` bypasses every gate. Multiple personas, context window, temperature and output limits |
+| **AI vision** | Images are downloaded and converted to data URLs before being sent to the model; handles CQ codes, HTML `<img>` and message elements, including stickers |
+| **Repeat (echo)** | Echoes a message once consecutive repeats reach a threshold; repeat events feed into the AI context |
+
+### Install
+
+```sh
+npm i @nestim/koishi-plugin-qq-group-manager
+```
+
+Or search `qq-group-manager` in the Koishi console plugin market.
+
+Requires `koishi >= 4.18.7` and a OneBot implementation (NapCat / LLOneBot, etc.) providing
+`setGroupBan` / `setGroupKick` / `getGroupMemberInfo`.
+
+### Commands
+
+All commands use `[prefix] args`; targets accept a QQ number or `@mention`.
+Send `[bot]` on its own to show the menu.
+
+| Command | Description |
+| --- | --- |
+| `[mute] QQ duration [reason]` | Mute. Duration `10` / `10m` / `1h` / `1d` / `1w`, max 30 days |
+| `[unmute] QQ [reason]` | Unmute |
+| `[kick] QQ [reason]` | Remove from the group (optionally reject future join requests and record to the blacklist) |
+| `[memory] content` | Save a memory |
+| `[memory] list` | List the 10 most recent memories |
+| `[memory] search keyword` | Search memories (`query` / `find` are synonyms) |
+| `[memory] delete keyword` | Delete memories containing the keyword (`del` is a synonym) |
+| `[ban] QQ [reason]` | Add to this group's blacklist |
+| `[unban] QQ [reason]` | Remove from this group's blacklist |
+| `[banlist]` | List this group's blacklist |
+| `[custom]` | List custom commands |
+| `[bot]` | Show the command menu |
+| `[Version]` | Show plugin info (version, author, GitHub and npm links) |
+
+**Join review**: a new request posts a 6-digit ID to the group. Admins reply with plain text —
+`approve [id] [reason]` or `reject [id] [reason]`. The ID may be omitted, in which case the
+most recent pending request in that group is used.
+
+### Configuration groups
+
+The plugin's config page is organised into 11 groups:
+`基础设置` · `消息管控` · `自动管控` · `记忆库` · `黑名单` · `娱乐设置` · `群聊互动` ·
+`自定义命令` · `AI 回复` · `权限设置` · `日志设置` (Basics · Message filtering · Auto
+punishment · Memory · Blacklist · Entertainment · Group interaction · Custom commands ·
+AI replies · Permissions · Logging).
+
+A few commonly used options:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `command` | `[bot]` | Menu entry prefix |
+| `allowedUserIds` | `[]` | Accounts allowed to use moderation commands directly |
+| `bannedWords` | `[]` | Banned words; supports `keyword\|score` for custom weights |
+| `bannedWordScoreThreshold` | `70` | Score threshold for banned words (shared with strong keywords) |
+| `strongKeywords` | `[]` | Strong keywords: match triggers moderation and **ignores allowlist exemptions**; supports `keyword\|score` |
+| `groupRules` | `[]` | Per-group overrides (banned words, strong keywords, allowlist keywords, AI toggles, auto-punishment thresholds) |
+| `enableJoinRequestReview` | `true` | Whether to enable join review |
+| `enableAiReply` | `false` | Master switch for AI replies (pair with `aiReplyRequireGroupRule` to enable per group) |
+| `dryRun` | `false` | Dry-run mode: log planned actions without executing them |
+
+### Data files
+
+All stored in the Koishi data directory (`ctx.baseDir`), readable and editable through the
+console Explorer:
+
+| File | Contents |
+| --- | --- |
+| `Memory.md` | Memory store, entries separated by `---` |
+| `banMember_<groupId>.md` | Per-group blacklist, `## QQ · note` plus join time |
+| `JoinRequests.md` | Pending join requests (human-readable table + machine-readable section); restored on restart, expired entries cleaned up automatically |
+
+### Permission model
+
+Moderation commands (`[mute]` `[unmute]` `[kick]` `[ban]` `[unban]` `[banlist]`) use
+**two-step authorization**:
+
+1. **Actor identity** — passes if the sender is in `allowedUserIds`; otherwise they must be
+   the group owner (`allowGroupOwner`) or a group admin (`allowGroupAdmin`).
+2. **Execution capability** — when `requireBotOwnerForAdmin` is on, the bot must itself be
+   owner or admin in that group.
+
+Both steps must pass. Authorization details and command results are written to logs only and
+are never echoed into the group.
+
 ## License
 
 MIT
+
+---
+
+📖 **完整文档请前往 GitHub / Full documentation on GitHub:**
+<https://github.com/Miseat/koishi-plugin-qq-group-manager#readme>
+
+- 🐛 Issues / 问题反馈：<https://github.com/Miseat/koishi-plugin-qq-group-manager/issues>
+- 📦 npm：<https://www.npmjs.com/package/@nestim/koishi-plugin-qq-group-manager>
+- 📝 更新日志 / Changelog：[CHANGELOG.md](https://github.com/Miseat/koishi-plugin-qq-group-manager/blob/master/CHANGELOG.md)

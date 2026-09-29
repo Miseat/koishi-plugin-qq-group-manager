@@ -32,7 +32,8 @@
     "koishi": "^4.18.7"
   },
   "koishi": {
-    "description": "QQ群管理插件（群管、自动管控、记忆、识图、AI回复）。"
+    "description": "QQ群管理插件（群管、自动管控、记忆、识图、AI回复）。",
+    "category": "manage"
   },
   "repository": {
     "type": "git",
