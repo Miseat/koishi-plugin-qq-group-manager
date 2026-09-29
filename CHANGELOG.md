@@ -2,6 +2,25 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.1.4
+
+### 文档
+
+- **README 新增完整英文段落**（Features / Install / Commands / Configuration /
+  Data files / Permission model）。此前文档全为中文，英文检索词下覆盖不足；
+  补齐后 `koishi qq group manager` 一类的英文查询也能读到插件能力说明。
+- **README 底部新增文档入口**，指向 GitHub 仓库、Issues、npm 与 CHANGELOG，
+  便于在 npm 详情页底部直接跳转查看完整文档。
+
+### 元数据
+
+- **新增 `koishi.category: "manage"`**。此前插件在 Koishi 插件市场没有分类，
+  影响市场内按分类浏览时的可发现性；`manage` 是群管类插件的主流分类。
+
+### 说明
+
+本版本**不含任何代码变更**，功能与 1.1.3 完全一致，仅更新文档与元数据。
+
 ## 1.1.3
 
 ### 修复
