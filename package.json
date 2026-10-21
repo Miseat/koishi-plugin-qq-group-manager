@@ -1,24 +1,32 @@
 {
   "name": "@nestim/koishi-plugin-qq-group-manager",
   "description": "Koishi QQ群管理插件（OneBot/LLOneBot）：群管命令、权限校验、图片菜单、状态卡片、复读、AI群聊回复、记忆库、识图与自动管控（禁言/踢人）。",
-  "version": "1.1.4",
+  "version": "1.2.5",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
     "lib",
-    "dist"
+    "src",
+    "tsconfig.json",
+    "CHANGELOG.md"
   ],
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "build": "tsc -b",
-    "clean": "tsc -b --clean",
-    "rebuild": "npm run clean && npm run build"
+    "build": "node scripts/build.mjs",
+    "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
+    "rebuild": "npm run build",
+    "test": "node --test \"test/*.test.mjs\"",
+    "prepublishOnly": "npm run test && npm run build"
   },
   "keywords": [
     "qq",
     "group",
     "onebot",
     "llonebot",
+    "napcat",
     "koishi",
     "koishi-plugin",
     "chatbot",
@@ -27,7 +35,11 @@
     "vision",
     "ai"
   ],
-  "devDependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "koishi": "4.18.11",
+    "typescript": "5.6.3"
+  },
   "peerDependencies": {
     "koishi": "^4.18.7"
   },

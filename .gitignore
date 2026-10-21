@@ -3,3 +3,9 @@ dist/
 .npmrc
 *.log
 .DS_Store
+
+# 运行期数据（可能被本地测试写出来）
+Memory.md
+JoinRequests.md
+banMember_*.md
+*.tsbuildinfo

@@ -29,7 +29,7 @@ Koishi 控制台「探索器 Explorer」里查看和手改。
 | **黑名单** | 按群独立存储（`banMember_<群号>.md`）；入群自动比对并踢出，可选踢人时自动记录 |
 | **入群审核** | 新申请推送到群内，管理员用 `approve` / `reject` 放行或拒绝；待审单落盘，**重启不丢** |
 | **记忆库** | `[memory]` 保存 / 列出 / 查询 / 删除，落盘 `Memory.md`；开启后 AI 回复会检索并引用相关记忆 |
-| **AI 群聊回复** | 三道闸门逐层收敛：①消息阈值 ②随机概率 ③兴趣评分，任一不过都不回复、也不调用模型；`@点名` 可越过全部闸门。多人格、点名后话题跟随、上下文窗口、温度与输出上限 |
+| **AI 群聊回复** | 三道闸门（阈值 / 概率 / 冷却）+ 模型自行 `<pass/>` 决定是否接话；群名片、引用、@ 目标、自己历史发言都进上下文；记忆按相关度注入；图片并发解析并限时。多人格、点名后话题跟随、温度与输出上限 |
 | **AI 识图** | 图片下载转 data URL 后送入模型，兼容 CQ 码 / HTML `<img>` / 元素三种形态与表情包 |
 | **复读** | 连续相同消息达阈值复读，支持图片引用回查；复读事件会进入 AI 上下文 |
 | **娱乐** | 自我约束（口球）与违规禁言惩罚，可开关与调节参数 |
@@ -97,25 +97,72 @@ npm i @nestim/koishi-plugin-qq-group-manager
 | `enableJoinRequestReview` | `true` | 是否发起入群审核 |
 | `enableAiReply` | `false` | AI 回复总开关（建议配合 `aiReplyRequireGroupRule` 逐群开启） |
 | `aiReplyRequireGroupRule` | `true` | 仅对已在 `groupRules` 中单独配置的群启用 AI 回复 |
+| `aiContextWindow` | `30` | 进入提示词的消息条数（建议 20~40） |
+| `aiReplyDecision` | `single` | `single` 一次调用（推荐）/ `two-stage` 两次调用 |
+| `aiMaxReplyChars` | `120` | 单条回复最大字符数 |
+| `aiImageBudgetMs` | `6000` | 图片解析总预算（毫秒），超时跳过 |
+| `aiDebugPrompt` | `false` | 把最终提示词写入日志，排查"答非所问" |
 | `dryRun` | `false` | 演练模式：只输出计划动作，不真正执行 |
 
 ## AI 回复与识图
 
 - **接口**：`openai-compatible`（OpenAI 兼容 Chat Completions）与 `gemini`（原生 `generateContent`）两类。
-- **触发**：三道闸门依序判定，任一不过都不回复，也不会产生模型调用：
-  1. `aiMessageThreshold` 消息阈值（`threshold` / `hybrid`）——累计未达阈值不触发，计数器在成功回复后清零；
+- **触发**：先过三道闸门，任一不过都不产生模型调用：
+  1. `aiMessageThreshold` 消息阈值（`threshold` / `hybrid`）——累计未达阈值不触发；
   2. `aiRandomReplyProbability` 随机概率（`random` / `hybrid`）——每条消息掷一次骰，未掷中直接跳过；
-  3. `aiInterestMinScore` 兴趣评分——调模型给消息打分，达标才回复。
+  3. 冷却：同一群两次真正调用模型之间至少间隔 `aiMinReplyIntervalSeconds`。
 
   `hybrid` 表示**两者都需满足**（先够消息数，再掷中概率）。消息中命中智能体自称或直接 `@bot` 时，
-  越过上述全部闸门直接触发。
+  越过上述全部闸门直接触发。点名与点名后跟随不受冷却限制。
+- **接话决策**：默认 `aiReplyDecision: single`——模型在回复时自行判断，不值得接话就只输出 `<pass/>`，
+  此时不会发消息并重置计数。这样「要不要回」和「回什么」是同一次判断，不会出现
+  「判定说该回、生成却回了另一条」的错位。设为 `two-stage` 则先判定再生成（多一次延迟）。
+- **上下文**：`aiContextWindow` 条消息按**时间顺序**进入提示词，包含 @ 目标（渲染成群昵称）、
+  引用消息原文、图片/表情/卡片占位，以及**机器人自己的历史发言**——不会"说完就忘"。
+  只回应当前消息，引用与回答始终指向同一条。
+- **群名片**：优先取群名片，为空时调用 `getGroupMemberInfo` 补齐并缓存，最后才退回 QQ 昵称/QQ 号。
+- **记忆**：只有与当前消息（或最近三条）真正有词面交集的记忆才会注入，并且提示词明确允许忽略；
+  旧版「搜不到就注入最近 6 条」的行为已移除，不会再出现"聊什么都能扯回某条旧记忆"。
 - **多人格**：`aiPersonas` 保存多套「自称 + 系统提示词」，用 `aiActivePersona` 切换。
-- **兴趣判定**：`aiInterestModel` 可为这一步单独指定模型（留空沿用 `aiModel`）。
-  兴趣判定只是二分类，用非推理的轻量模型可显著降低耗时与成本。
-  `aiInterestMaxTokens`（默认 2048）控制其最大输出 token——**带思考的推理模型会先消耗
-  reasoning token，额度太小会让正文为空、判定静默失效**。
-- **识图**：开启 `aiEnableImageRecognition` 后，图片会下载并转为 data URL 再送入模型，
-  不依赖模型侧访问 QQ 图链；兼容 CQ 码、HTML `<img>`、消息元素与表情包。
+- **识图**：开启 `aiEnableImageRecognition` 后，图片并发下载并转为 data URL 再送入模型；
+  总预算由 `aiImageBudgetMs` 控制（默认 6 秒），超时直接跳过，不再把回复拖到几十秒。
+  模型不支持图片时会自动降级为纯文本并记住该结论，后续不再重复尝试。
+- **输出**：单条消息，`aiMaxReplyChars`（默认 120）限制长度；推荐 `aiTemperature` 0.7~0.9。
+- **调试**：`aiDebugPrompt` 打开后会把最终提示词写进日志，便于排查"到底看到了什么"。
+- **扩展点**：`ctx.nestimQqGroupManager.aiHooks`（接口版本 1）。外部插件可
+  `registerPromptSection()` 追加风格段、`registerOutputFilter()` 过滤或丢弃输出；
+  钩子异常会被隔离，不影响正常回复。跨插件使用时请注入 root 上的 `qqgmAiHooks`。
+  配套的本地风格插件 `koishi-plugin-qqgm-chat-style` 不随本包发布，按需单独部署。
+
+## 外部插件接口（1.2.2+）
+
+主插件暴露一个很小的扩展点，第三方插件可以给 AI 追加“说话风格”，或在发送前过滤输出，
+不需要修改主插件源码：
+
+```ts
+export const inject = ['qqgmAiHooks']
+
+export function apply(ctx) {
+  const hooks = ctx.qqgmAiHooks
+  if (!hooks) return
+
+  // 追加到 system prompt 的【说话风格】段
+  const off1 = hooks.registerPromptSection(() => '说话短一点，别用“首先/其次”这类词')
+
+  // 发送前过滤；返回 null 表示这条不发（按 pass 处理）
+  const off2 = hooks.registerOutputFilter((text) => text.replace(/首先/g, ''))
+
+  ctx.on('dispose', () => {
+    off1()
+    off2()
+  })
+}
+```
+
+- 风格段插在基础规则之后、`<pass/>` 规则之前，并声明“与系统规则冲突时以系统规则为准”。
+- 过滤器按注册顺序执行，异常会被隔离；过滤后的文本才会写回上下文。
+- `hooks.version` 目前为 `1`，外部插件应先检查版本。
+
 
 ## 数据文件
 
@@ -168,8 +215,8 @@ as Markdown files that you can read and edit directly in the Koishi console (Exp
 | **Blacklist** | Stored per group (`banMember_<groupId>.md`); join requests are matched automatically and rejected |
 | **Join review** | New requests are pushed to the group; admins use `approve` / `reject`. Pending requests are persisted and **survive restarts** |
 | **Memory store** | `[memory]` save / list / search / delete into `Memory.md`; when enabled, AI replies retrieve and cite relevant memories |
-| **AI replies** | Three sequential gates: ① message threshold ② random probability ③ interest scoring. Failing any gate means no reply and no model call; an `@mention` bypasses every gate. Multiple personas, context window, temperature and output limits |
-| **AI vision** | Images are downloaded and converted to data URLs before being sent to the model; handles CQ codes, HTML `<img>` and message elements, including stickers |
+| **AI replies** | Three gates (threshold / probability / cooldown) plus a model-decided `<pass/>` opt-out. Group cards, quoted text, @ targets and the bot's own history all enter the prompt; memories are injected only when relevant; images are resolved concurrently with a time budget. Multiple personas, follow-up window, temperature and output limits |
+| **AI vision** | Images are downloaded concurrently and converted to data URLs before being sent to the model; handles CQ codes, HTML `<img>` and message elements, including stickers. Models without vision support degrade to text automatically |
 | **Repeat (echo)** | Echoes a message once consecutive repeats reach a threshold; repeat events feed into the AI context |
 
 ### Install

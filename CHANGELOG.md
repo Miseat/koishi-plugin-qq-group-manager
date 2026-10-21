@@ -2,6 +2,142 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.2.5
+
+### 新增
+
+- **`aiHooks.registerAfterReply`**：文字回复发送并写入上下文后触发，参数带最终文本。
+  用于追加表情包等“文字之后”的动作，保证先文字、后图片。
+- **root 暴露 `qqgmAiRuntime`**：`{ config, hooks, chat }`。私聊等外部插件可以复用
+  同一个模型 provider 与同一套 style/meme 扩展点，不必重复配置 API Key。
+
+## 1.2.4
+
+### 修复
+
+- **识图：先发图、再单独 @ 机器人时图片丢失**。`collectImages` 原本只看当前消息和引用消息，
+  当前消息只有文字时 `images=0`，机器人会回“图没刷出来”。
+  现在当前消息没有图时，会回看最近 2 分钟内**同一用户**最近 1–2 条消息里的图
+  （仍受 `aiImageMaxCount` 限制）；不回看其他用户的图，也不回看超过 2 分钟的图。
+- 删除 1.2.3 诊断期临时加的 `[ai-image]` 日志。
+
+## 1.2.3
+
+### 修复
+
+- **续聊（followup）触发过宽**：用户换话题后，像“操不会说话了”这种短句仍会被当成
+  “接着上一轮说”，导致机器人追着自己的旧话题自说自话。
+  现在必须满足“与上一轮有话题交集”或“明确追问词（展开/细说/然后/为什么…）”才续聊，
+  否则直接清掉待续状态，按新消息重新判断。
+
+## 1.2.2
+
+### 修复
+
+- **1.2.1 的 `aiHooks` 对兄弟插件不可达**：Koishi 的 `Service` 注册在插件 fork 作用域，
+  外部插件 `inject: ['nestimQqGroupManager']` 拿不到，导致风格插件静默不生效。
+  现在额外把扩展点挂到 root 的 `qqgmAiHooks`，外部插件 `inject: ['qqgmAiHooks']` 即可；
+  `ctx.nestimQqGroupManager.aiHooks` 仍保留，供同进程直接访问。
+- 配套的 `koishi-plugin-qqgm-chat-style` 改为注入 `qqgmAiHooks`。
+
+## 1.2.1
+
+> **本版新增外部插件接口 `aiHooks`。** 第三方 Koishi 插件可以给 AI 追加“说话风格”提示词，
+> 并在发送前过滤/丢弃输出，不需要改主插件，也不需要发新版本。
+
+### 新增
+
+- **AI 扩展点 `aiHooks`（接口版本 1）**：外部 Koishi 插件可以在不改主插件代码的前提下
+  追加“说话风格”提示词段，并在发送前过滤输出。
+  - `registerPromptSection(fn)`：返回的文本会插入 system prompt 的【说话风格】段
+    （位置在基础规则之后、`<pass/>` 规则之前），并声明“与系统规则冲突时以系统规则为准”。
+  - `registerOutputFilter(fn)`：在清洗后、发送前依次执行；返回 `null` 表示丢弃这条回复
+    （按 pass 处理）。
+  - 钩子抛错会被隔离并记日志，不影响正常回复；取消注册函数在插件 dispose 时调用。
+- 配套本地插件（不发布 npm）：`koishi-plugin-qqgm-chat-style`，用于加载
+  `.skill/SKILL.md`（仅接受聊天风格类），并做限字数、限行数、删禁词等输出规范。
+
+### 外部接口示例
+
+```ts
+export const inject = ['nestimQqGroupManager']
+
+export function apply(ctx) {
+  const hooks = ctx.nestimQqGroupManager.aiHooks
+  if (!hooks) return
+
+  const off1 = hooks.registerPromptSection(() => '说话短一点，别用“首先/其次”这类词')
+  const off2 = hooks.registerOutputFilter((text) => text.replace(/首先/g, ''))
+
+  ctx.on('dispose', () => {
+    off1()
+    off2()
+  })
+}
+```
+
+### 说明
+
+- 无配置变更，旧版本行为不变；不安装风格插件时 `aiHooks` 只是空注册表。
+
+## 1.2.0
+
+### 重构：AI 回复管线
+
+- **决策与生成合并为一次模型调用**。旧版先调一次「兴趣判定」决定值与不值，再调一次生成，
+  两次判断的对象不同（前者看当前消息，后者让模型"从上下文里挑一条"），必然出现
+  「判定说该回、生成却回了另一条」。现在由模型在回复时自行输出 `<pass/>` 放弃接话，
+  「要不要回」和「回什么」是同一次判断。
+- **上下文严格按时间顺序**。删除了按关键词重排上下文、`SELECTED_TARGET` 标记以及
+  「不要优先回复最后一条」的指令——这三者是"答非所问"的直接来源。
+- **引用与回答始终指向同一条**。旧版在阈值模式下回答的是某条旧消息，发送时却固定
+  `quote` 当前最新消息，群里看到的是"引用了 A 却回答 B"。
+- **机器人自己的发言进入上下文**。旧版直接过滤 self 消息，且 NapCat 默认不上报自己发的消息，
+  导致它"说完就忘"。现在每次发送后把回复写回上下文，并以「你」标注。
+- **引用消息正文进入上下文**。旧版只从引用里取图片，正文完全丢失；现在渲染为
+  `「回复 张三：原文」` 前缀。
+- **@ 目标不再被抹掉**。旧版用 `replace(/<[^>]+>/g,' ')` 把所有标签删掉，模型不知道"谁在叫谁"；
+  现在 @ 渲染为群昵称，`@bot` 渲染为 `@你`。
+- **群名片链路补全**：`sender.card` → `getGroupMemberInfo().card` → QQ 昵称 → QQ 号，
+  按「群 + QQ」缓存 10 分钟；`author.nickname` 这个恒为 undefined 的死分支已移除。
+
+### 修复：记忆污染
+
+- **记忆只在真正相关时注入**。旧版用整句 `includes` 匹配，中文几乎永远匹配不到，
+  于是每次 fallback 注入最近 6 条记忆，导致"不管聊什么都能扯回星野爱"。
+  现在按中文二元组重叠打分，没有交集就一条都不给，并明确告诉模型"不相关必须忽略"。
+- **删除把"自己上一条回复"当作"当前群话题"的逻辑**——它会让话题偏移后一路偏下去。
+
+### 性能
+
+- **图片并发解析 + 总预算**（`aiImageBudgetMs`，默认 6 秒）。旧版串行下载，每张图 12 秒超时、
+  多候选依次尝试，实测出现过 **63 秒**的回复延迟。超时/失败直接跳过，不再阻塞回复。
+- **推理模型空正文自动重试**：`finish_reason=length` 且正文为空时，自动放大输出预算重试一次，
+  避免"该回的消息不回"。
+- **模型不支持图片时自动降级**：400/422 命中后记住结论，后续直接发纯文本，不再每次白跑一趟。
+- 单条回复不再拆成最多 4 条发，`aiMaxReplyChars` 统一截断。
+
+### 工程
+
+- **新增 `src/` 源码工程与 `tsconfig.json`**。此前仓库只有 `lib/*.js` 编译产物，
+  历史提交都是直接改生成代码；现在 `npm run build` 从 `src/` 重新生成 `lib/`。
+- **新增测试**：`npm test` 覆盖消息渲染、群名片解析、提示词顺序/引用/记忆、触发闸门、
+  记忆检索、图片降级、推理重试与端到端引擎行为（57 项）。
+- **删除死代码**：`parseMuteArguments` / `extractMuteTokens` / `extractAtIds`（其中
+  `extractAtIds` 读的是 `el.id` 而非 `el.attrs.id`，从未生效）、`isStickerElement`、
+  `describeImageMessage` / `logImageDebug` 等约 1200 行。
+- `.d.ts` 由 tsc 统一生成，修复了 `handleMemoryCommand` 等与实际实现不一致的漂移。
+
+### 新增配置
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `aiReplyDecision` | `single` | `single` 一次调用（推荐）/ `two-stage` 两次调用 |
+| `aiMaxReplyChars` | `120` | 单条回复最大字符数 |
+| `aiImageBudgetMs` | `6000` | 图片解析总预算（毫秒） |
+| `aiRequestTimeoutSeconds` | `20` | 单次模型请求超时 |
+| `aiDebugPrompt` | `false` | 把最终提示词写入日志 |
+
 ## 1.1.4
 
 ### 文档

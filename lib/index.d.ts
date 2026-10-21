@@ -1,37 +1,290 @@
 import { Context, Schema } from 'koishi';
-export declare const name = "qq-group-manager";
+export declare const name = "nestim-qq-group-manager";
 export declare const inject: {
     optional: string[];
 };
-export interface Config {
+export declare const Config: Schema<Schemastery.ObjectS<{
+    command: Schema<string, string>;
+    cmdMute: Schema<string, string>;
+    cmdUnmute: Schema<string, string>;
+    cmdKick: Schema<string, string>;
+    cmdMemory: Schema<string, string>;
+    cmdBan: Schema<string, string>;
+    cmdUnban: Schema<string, string>;
+    cmdBanList: Schema<string, string>;
+    cmdCustom: Schema<string, string>;
+    cmdVersion: Schema<string, string>;
+    platformFilter: Schema<string[], string[]>;
+    responseStyle: Schema<"plain" | "meow", "plain" | "meow">;
+    dryRun: Schema<boolean, boolean>;
+}> | Schemastery.ObjectS<{
+    bannedWords: Schema<string[], string[]>;
+    bannedWordScoreThreshold: Schema<number, number>;
+    strongKeywords: Schema<string[], string[]>;
+    blockCardMessage: Schema<boolean, boolean>;
+    blockForwardMessage: Schema<boolean, boolean>;
+    autoDeleteViolation: Schema<boolean, boolean>;
+    sendViolationNotice: Schema<boolean, boolean>;
+    groupRules: Schema<Schemastery.ObjectS<{
+        guildId: Schema<string, string>;
+        enableAiReply: Schema<boolean, boolean>;
+        bannedWords: Schema<string[], string[]>;
+        whitelistKeywords: Schema<string[], string[]>;
+        strongKeywords: Schema<string[], string[]>;
+        whitelistOnlyOwners: Schema<boolean, boolean>;
+        blockCardMessage: Schema<boolean, boolean>;
+        blockForwardMessage: Schema<boolean, boolean>;
+        autoDeleteViolation: Schema<boolean, boolean>;
+        sendViolationNotice: Schema<boolean, boolean>;
+        autoMuteEnabled: Schema<boolean, boolean>;
+        autoMuteThreshold: Schema<number, number>;
+        autoMuteMinutes: Schema<number, number>;
+        autoKickEnabled: Schema<boolean, boolean>;
+        autoKickThreshold: Schema<number, number>;
+        autoViolationWindowMinutes: Schema<number, number>;
+        enableJoinRequestReview: Schema<boolean, boolean>;
+        blacklistEnabled: Schema<boolean, boolean>;
+    }>[], Schemastery.ObjectT<{
+        guildId: Schema<string, string>;
+        enableAiReply: Schema<boolean, boolean>;
+        bannedWords: Schema<string[], string[]>;
+        whitelistKeywords: Schema<string[], string[]>;
+        strongKeywords: Schema<string[], string[]>;
+        whitelistOnlyOwners: Schema<boolean, boolean>;
+        blockCardMessage: Schema<boolean, boolean>;
+        blockForwardMessage: Schema<boolean, boolean>;
+        autoDeleteViolation: Schema<boolean, boolean>;
+        sendViolationNotice: Schema<boolean, boolean>;
+        autoMuteEnabled: Schema<boolean, boolean>;
+        autoMuteThreshold: Schema<number, number>;
+        autoMuteMinutes: Schema<number, number>;
+        autoKickEnabled: Schema<boolean, boolean>;
+        autoKickThreshold: Schema<number, number>;
+        autoViolationWindowMinutes: Schema<number, number>;
+        enableJoinRequestReview: Schema<boolean, boolean>;
+        blacklistEnabled: Schema<boolean, boolean>;
+    }>[]>;
+}> | Schemastery.ObjectS<{
+    enableAutoMute: Schema<boolean, boolean>;
+    autoMuteViolationThreshold: Schema<number, number>;
+    autoMuteMinutes: Schema<number, number>;
+    enableAutoKick: Schema<boolean, boolean>;
+    autoKickViolationThreshold: Schema<number, number>;
+    autoViolationWindowMinutes: Schema<number, number>;
+}> | Schemastery.ObjectS<{
+    enableMemory: Schema<boolean, boolean>;
+    memoryFileName: Schema<string, string>;
+    memoryInAi: Schema<boolean, boolean>;
+}> | Schemastery.ObjectS<{
+    enableBlacklist: Schema<boolean, boolean>;
+    blacklistFileName: Schema<string, string>;
+    banCommand: Schema<string, string>;
+    banKickOnJoin: Schema<boolean, boolean>;
+    banRecordOnKick: Schema<boolean, boolean>;
+}> | Schemastery.ObjectS<{
+    enableSelfGag: Schema<boolean, boolean>;
+    enableUnauthorizedMutePunish: Schema<boolean, boolean>;
+    unauthorizedMuteAttemptThreshold: Schema<number, number>;
+    unauthorizedMuteWindowMinutes: Schema<number, number>;
+    unauthorizedMutePunishMinMinutes: Schema<number, number>;
+    unauthorizedMutePunishMaxMinutes: Schema<number, number>;
+}> | Schemastery.ObjectS<{
+    enableRepeater: Schema<boolean, boolean>;
+    repeaterThreshold: Schema<number, number>;
+    repeaterCooldownSeconds: Schema<number, number>;
+    repeaterEnableGetMsgRefetch: Schema<boolean, boolean>;
+    enableJoinRequestReview: Schema<boolean, boolean>;
+    joinRequestReviewTtlMinutes: Schema<number, number>;
+    pendingJoinFileName: Schema<string, string>;
+}> | Schemastery.ObjectS<{
+    customCommands: Schema<Schemastery.ObjectS<{
+        trigger: Schema<string, string>;
+        replies: Schema<string[], string[]>;
+        enabled: Schema<boolean, boolean>;
+        groups: Schema<string[], string[]>;
+        randomReply: Schema<boolean, boolean>;
+        quote: Schema<boolean, boolean>;
+        cooldownSeconds: Schema<number, number>;
+        logHit: Schema<boolean, boolean>;
+    }>[], Schemastery.ObjectT<{
+        trigger: Schema<string, string>;
+        replies: Schema<string[], string[]>;
+        enabled: Schema<boolean, boolean>;
+        groups: Schema<string[], string[]>;
+        randomReply: Schema<boolean, boolean>;
+        quote: Schema<boolean, boolean>;
+        cooldownSeconds: Schema<number, number>;
+        logHit: Schema<boolean, boolean>;
+    }>[]>;
+}> | Schemastery.ObjectS<{
+    enableAiReply: Schema<boolean, boolean>;
+    aiReplyRequireGroupRule: Schema<boolean, boolean>;
+    aiProvider: Schema<"openai-compatible" | "gemini", "openai-compatible" | "gemini">;
+    aiApiKey: Schema<string, string>;
+    aiBaseUrl: Schema<string, string>;
+    aiModel: Schema<string, string>;
+    aiAgentName: Schema<string, string>;
+    aiSystemPrompt: Schema<string, string>;
+    aiActivePersona: Schema<string, string>;
+    aiPersonas: Schema<Schemastery.ObjectS<{
+        id: Schema<string, string>;
+        selfName: Schema<string, string>;
+        prompt: Schema<string, string>;
+    }>[], Schemastery.ObjectT<{
+        id: Schema<string, string>;
+        selfName: Schema<string, string>;
+        prompt: Schema<string, string>;
+    }>[]>;
+    aiReplyMode: Schema<"threshold" | "random" | "hybrid", "threshold" | "random" | "hybrid">;
+    aiMessageThreshold: Schema<number, number>;
+    aiRandomReplyProbability: Schema<number, number>;
+    aiMinReplyIntervalSeconds: Schema<number, number>;
+    aiContextWindow: Schema<number, number>;
+    aiTemperature: Schema<number, number>;
+    aiMaxOutputTokens: Schema<number, number>;
+    aiMaxReplyChars: Schema<number, number>;
+    aiReplyDecision: Schema<"two-stage" | "single", "two-stage" | "single">;
+    aiEnableImageRecognition: Schema<boolean, boolean>;
+    aiImageMaxCount: Schema<number, number>;
+    aiImageBudgetMs: Schema<number, number>;
+    aiRequestTimeoutSeconds: Schema<number, number>;
+    aiDebugPrompt: Schema<boolean, boolean>;
+    aiIgnoreCommandMessage: Schema<boolean, boolean>;
+    aiEnableDirectMentionTrigger: Schema<boolean, boolean>;
+    aiEnableFollowupAfterMention: Schema<boolean, boolean>;
+    aiFollowupWindowSeconds: Schema<number, number>;
+    aiFollowupMaxTurns: Schema<number, number>;
+    aiOwnerPlatform: Schema<string, string>;
+    aiOwnerUserId: Schema<string, string>;
+    aiHomePlatform: Schema<string, string>;
+    aiHomeUserId: Schema<string, string>;
+    aiInterestMinScore: Schema<number, number>;
+    aiInterestContextWindow: Schema<number, number>;
+    aiInterestModel: Schema<string, string>;
+    aiInterestMaxTokens: Schema<number, number>;
+}> | Schemastery.ObjectS<{
+    allowedUserIds: Schema<string[], string[]>;
+    allowGroupOwner: Schema<boolean, boolean>;
+    allowGroupAdmin: Schema<boolean, boolean>;
+    requireBotOwnerForAdmin: Schema<boolean, boolean>;
+    allowAdminBypassWhitelistMute: Schema<boolean, boolean>;
+}> | Schemastery.ObjectS<{
+    logCommandResult: Schema<boolean, boolean>;
+    logAuthCheck: Schema<boolean, boolean>;
+}>, {
     command: string;
+    cmdMute: string;
+    cmdUnmute: string;
+    cmdKick: string;
+    cmdMemory: string;
+    cmdBan: string;
+    cmdUnban: string;
+    cmdBanList: string;
+    cmdCustom: string;
+    cmdVersion: string;
     platformFilter: string[];
-    responseStyle: 'plain' | 'meow';
+    responseStyle: "plain" | "meow";
     dryRun: boolean;
+} & import("koishi").Dict & {
+    bannedWords: string[];
+    bannedWordScoreThreshold: number;
+    strongKeywords: string[];
+    blockCardMessage: boolean;
+    blockForwardMessage: boolean;
+    autoDeleteViolation: boolean;
+    sendViolationNotice: boolean;
+    groupRules: Schemastery.ObjectT<{
+        guildId: Schema<string, string>;
+        enableAiReply: Schema<boolean, boolean>;
+        bannedWords: Schema<string[], string[]>;
+        whitelistKeywords: Schema<string[], string[]>;
+        strongKeywords: Schema<string[], string[]>;
+        whitelistOnlyOwners: Schema<boolean, boolean>;
+        blockCardMessage: Schema<boolean, boolean>;
+        blockForwardMessage: Schema<boolean, boolean>;
+        autoDeleteViolation: Schema<boolean, boolean>;
+        sendViolationNotice: Schema<boolean, boolean>;
+        autoMuteEnabled: Schema<boolean, boolean>;
+        autoMuteThreshold: Schema<number, number>;
+        autoMuteMinutes: Schema<number, number>;
+        autoKickEnabled: Schema<boolean, boolean>;
+        autoKickThreshold: Schema<number, number>;
+        autoViolationWindowMinutes: Schema<number, number>;
+        enableJoinRequestReview: Schema<boolean, boolean>;
+        blacklistEnabled: Schema<boolean, boolean>;
+    }>[];
+} & {
+    enableAutoMute: boolean;
+    autoMuteViolationThreshold: number;
+    autoMuteMinutes: number;
+    enableAutoKick: boolean;
+    autoKickViolationThreshold: number;
+    autoViolationWindowMinutes: number;
+} & {
+    enableMemory: boolean;
+    memoryFileName: string;
+    memoryInAi: boolean;
+} & {
+    enableBlacklist: boolean;
+    blacklistFileName: string;
+    banCommand: string;
+    banKickOnJoin: boolean;
+    banRecordOnKick: boolean;
+} & {
     enableSelfGag: boolean;
     enableUnauthorizedMutePunish: boolean;
     unauthorizedMuteAttemptThreshold: number;
     unauthorizedMuteWindowMinutes: number;
     unauthorizedMutePunishMinMinutes: number;
     unauthorizedMutePunishMaxMinutes: number;
+} & {
+    enableRepeater: boolean;
+    repeaterThreshold: number;
+    repeaterCooldownSeconds: number;
+    repeaterEnableGetMsgRefetch: boolean;
+    enableJoinRequestReview: boolean;
+    joinRequestReviewTtlMinutes: number;
+    pendingJoinFileName: string;
+} & {
+    customCommands: Schemastery.ObjectT<{
+        trigger: Schema<string, string>;
+        replies: Schema<string[], string[]>;
+        enabled: Schema<boolean, boolean>;
+        groups: Schema<string[], string[]>;
+        randomReply: Schema<boolean, boolean>;
+        quote: Schema<boolean, boolean>;
+        cooldownSeconds: Schema<number, number>;
+        logHit: Schema<boolean, boolean>;
+    }>[];
+} & {
     enableAiReply: boolean;
-    aiProvider: 'openai-compatible' | 'gemini';
+    aiReplyRequireGroupRule: boolean;
+    aiProvider: "openai-compatible" | "gemini";
     aiApiKey: string;
     aiBaseUrl: string;
     aiModel: string;
     aiAgentName: string;
     aiSystemPrompt: string;
     aiActivePersona: string;
-    aiPersonas: AIPersona[];
-    aiReplyMode: 'threshold' | 'random' | 'hybrid';
+    aiPersonas: Schemastery.ObjectT<{
+        id: Schema<string, string>;
+        selfName: Schema<string, string>;
+        prompt: Schema<string, string>;
+    }>[];
+    aiReplyMode: "threshold" | "random" | "hybrid";
     aiMessageThreshold: number;
     aiRandomReplyProbability: number;
     aiMinReplyIntervalSeconds: number;
     aiContextWindow: number;
     aiTemperature: number;
     aiMaxOutputTokens: number;
+    aiMaxReplyChars: number;
+    aiReplyDecision: "two-stage" | "single";
     aiEnableImageRecognition: boolean;
     aiImageMaxCount: number;
+    aiImageBudgetMs: number;
+    aiRequestTimeoutSeconds: number;
+    aiDebugPrompt: boolean;
     aiIgnoreCommandMessage: boolean;
     aiEnableDirectMentionTrigger: boolean;
     aiEnableFollowupAfterMention: boolean;
@@ -45,58 +298,14 @@ export interface Config {
     aiInterestContextWindow: number;
     aiInterestModel: string;
     aiInterestMaxTokens: number;
-    enableRepeater: boolean;
-    repeaterThreshold: number;
-    repeaterCooldownSeconds: number;
-    repeaterEnableGetMsgRefetch: boolean;
-    enableJoinRequestReview: boolean;
-    joinRequestReviewTtlMinutes: number;
-    pendingJoinFileName: string;
-    bannedWords: string[];
-    strongKeywords: string[];
-    blockCardMessage: boolean;
-    blockForwardMessage: boolean;
-    autoDeleteViolation: boolean;
-    sendViolationNotice: boolean;
-    enableAutoMute: boolean;
-    autoMuteViolationThreshold: number;
-    autoMuteMinutes: number;
-    enableAutoKick: boolean;
-    autoKickViolationThreshold: number;
-    autoViolationWindowMinutes: number;
-    enableMemory: boolean;
-    memoryFileName: string;
-    memoryInAi: boolean;
-    groupRules: GroupRule[];
+} & {
     allowedUserIds: string[];
     allowGroupOwner: boolean;
     allowGroupAdmin: boolean;
     requireBotOwnerForAdmin: boolean;
     allowAdminBypassWhitelistMute: boolean;
+} & {
     logCommandResult: boolean;
     logAuthCheck: boolean;
-}
-export interface AIPersona {
-    id: string;
-    selfName: string;
-    prompt: string;
-}
-export interface GroupRule {
-    guildId: string;
-    enableAiReply?: boolean;
-    bannedWords: string[];
-    strongKeywords?: string[];
-    blockCardMessage: boolean;
-    blockForwardMessage: boolean;
-    autoDeleteViolation: boolean;
-    sendViolationNotice: boolean;
-    autoMuteEnabled?: boolean;
-    autoMuteThreshold?: number;
-    autoMuteMinutes?: number;
-    autoKickEnabled?: boolean;
-    autoKickThreshold?: number;
-    autoViolationWindowMinutes?: number;
-    enableJoinRequestReview?: boolean;
-}
-export declare const Config: Schema<Config>;
-export declare function apply(ctx: Context, config: Config): void;
+}>;
+export declare function apply(ctx: Context, config: any): void;
