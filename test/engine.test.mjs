@@ -29,6 +29,14 @@ function makeConfig(overrides = {}) {
     aiEnableImageRecognition: false,
     aiImageMaxCount: 0,
     aiImageBudgetMs: 1000,
+    aiApiKey: 'test-key',
+    aiBaseUrl: 'https://api.deepseek.com',
+    aiWebSearchEnabled: false,
+    aiWebSearchMode: 'auto',
+    aiWebSearchMaxResults: 3,
+    aiWebSearchTimeoutMs: 1000,
+    aiWebSearchMaxPerHour: 10,
+    aiWebSearchCacheMinutes: 10,
     aiEnableFollowupAfterMention: false,
     aiReplyDecision: 'single',
     aiDebugPrompt: false,
@@ -360,4 +368,130 @@ test('回复发送后触发 afterReply，并带上最终文本', async () => {
   engine.hooks.registerAfterReply((ctx) => { seen.push(ctx.text); });
   await engine.handle(textSession('在吗'));
   assert.deepEqual(seen, ['收到']);
+});
+
+test('引用消息里的图片会送进模型', async () => {
+  const config = makeConfig({
+    aiMessageThreshold: 99,
+    aiEnableImageRecognition: true,
+    aiImageMaxCount: 2,
+    aiImageBudgetMs: 1000,
+  });
+  const provider = makeProvider('看到了');
+  const host = makeHost(config);
+  host.resolveImage = async () => 'data:image/jpeg;base64,AAAA';
+  const engine = new AiEngine(host, { provider });
+
+  const session = mentionSession('看看这张', {
+    quote: {
+      id: 'q1',
+      user: { id: '123', name: '甲' },
+      content: '<img src="https://example.test/quoted.jpg"/>',
+      elements: [{ type: 'img', attrs: { src: 'https://example.test/quoted.jpg' } }],
+    },
+  });
+  await engine.handle(session);
+  assert.equal(provider.calls.length, 1);
+  assert.equal(provider.calls[0].images.length, 1);
+});
+
+test('引用消息只带 id 时用 get_msg 回查图片', async () => {
+  const config = makeConfig({
+    aiMessageThreshold: 99,
+    aiEnableImageRecognition: true,
+    aiImageMaxCount: 2,
+    aiImageBudgetMs: 1000,
+  });
+  const provider = makeProvider('看到了');
+  const host = makeHost(config);
+  host.resolveImage = async () => 'data:image/jpeg;base64,AAAA';
+  host.fetchQuotedImages = async () => [{ url: 'https://example.test/quoted.jpg', ref: '', sticker: false }];
+  const engine = new AiEngine(host, { provider });
+
+  const session = mentionSession('看看这张', {
+    quote: { id: 'q2', user: { id: '123', name: '甲' }, content: '[图片]', elements: [] },
+  });
+  await engine.handle(session);
+  assert.equal(provider.calls[0].images.length, 1);
+});
+
+test('默认自称是 bot', async () => {
+  const config = makeConfig({ aiAgentName: undefined, aiMessageThreshold: 1 });
+  const provider = makeProvider('在');
+  const engine = new AiEngine(makeHost(config), { provider });
+  await engine.handle(textSession('在吗'));
+  assert.match(provider.calls[0].system, /「bot」/);
+});
+
+test('空闲话题带风格段并返回清洗后的文本', async () => {
+  const config = makeConfig({ aiAgentName: 'bot' });
+  const provider = makeProvider('今天谁还在摸鱼');
+  const host = makeHost(config);
+  const engine = new AiEngine(host, { provider });
+  engine.hooks.registerPromptSection(() => 'STYLE_SECTION');
+  const text = await engine.idleTopic('1103369527');
+  assert.equal(text, '今天谁还在摸鱼');
+  assert.match(provider.calls[0].system, /主动抛/);
+  assert.match(provider.calls[0].system, /STYLE_SECTION/);
+});
+
+test('联网搜索：结果注入到当前消息之前', async () => {
+  const config = makeConfig({
+    aiMessageThreshold: 99,
+    aiWebSearchEnabled: true,
+    aiWebSearchMode: 'auto',
+    aiWebSearchMaxResults: 3,
+  });
+  const provider = makeProvider('据测试站点，今天有新闻');
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: [{
+          title: '测试标题',
+          url: 'https://example.test/a',
+          summary: '测试摘要内容',
+          site_name: '测试站点',
+          date: '2026-10-23T00:00:00Z',
+        }],
+      }),
+    };
+  };
+  const engine = new AiEngine(makeHost(config), { provider, fetchImpl });
+  await engine.handle(mentionSession('搜一下今天的新闻'));
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/v1\/tools\/search$/);
+  assert.match(provider.calls[0].user, /【联网搜索结果】/);
+  assert.match(provider.calls[0].user, /测试标题/);
+  assert.match(provider.calls[0].user, /\[1\]/);
+});
+
+test('搜索 API 不支持时回退普通回复', async () => {
+  const config = makeConfig({ aiMessageThreshold: 99, aiWebSearchEnabled: true });
+  const provider = makeProvider('正常回复');
+  let called = 0;
+  const fetchImpl = async () => {
+    called += 1;
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  const engine = new AiEngine(makeHost(config), { provider, fetchImpl });
+  await engine.handle(mentionSession('查一下今天的新闻'));
+  assert.equal(called, 1);
+  assert.equal(provider.calls.length, 1);
+  assert.doesNotMatch(provider.calls[0].user, /【联网搜索结果】/);
+});
+
+test('普通聊天不触发搜索', async () => {
+  const config = makeConfig({ aiMessageThreshold: 1, aiWebSearchEnabled: true });
+  let called = 0;
+  const fetchImpl = async () => {
+    called += 1;
+    throw new Error('should not be called');
+  };
+  const engine = new AiEngine(makeHost(config), { provider: makeProvider('嗯'), fetchImpl });
+  await engine.handle(textSession('今天好累'));
+  assert.equal(called, 0);
 });

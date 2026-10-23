@@ -124,6 +124,11 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiBaseUrl: Schema<string, string>;
     aiModel: Schema<string, string>;
     aiAgentName: Schema<string, string>;
+    aiMentionCooldownSeconds: Schema<number, number>;
+    aiIdleTopicMinutes: Schema<number, number>;
+    aiIdleTopicMinHour: Schema<number, number>;
+    aiIdleTopicMaxHour: Schema<number, number>;
+    aiIdleTopicCooldownMinutes: Schema<number, number>;
     aiSystemPrompt: Schema<string, string>;
     aiActivePersona: Schema<string, string>;
     aiPersonas: Schema<Schemastery.ObjectS<{
@@ -147,6 +152,12 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiEnableImageRecognition: Schema<boolean, boolean>;
     aiImageMaxCount: Schema<number, number>;
     aiImageBudgetMs: Schema<number, number>;
+    aiWebSearchEnabled: Schema<boolean, boolean>;
+    aiWebSearchMode: Schema<"auto" | "always" | "off", "auto" | "always" | "off">;
+    aiWebSearchMaxResults: Schema<number, number>;
+    aiWebSearchTimeoutMs: Schema<number, number>;
+    aiWebSearchMaxPerHour: Schema<number, number>;
+    aiWebSearchCacheMinutes: Schema<number, number>;
     aiRequestTimeoutSeconds: Schema<number, number>;
     aiDebugPrompt: Schema<boolean, boolean>;
     aiIgnoreCommandMessage: Schema<boolean, boolean>;
@@ -264,6 +275,11 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiBaseUrl: string;
     aiModel: string;
     aiAgentName: string;
+    aiMentionCooldownSeconds: number;
+    aiIdleTopicMinutes: number;
+    aiIdleTopicMinHour: number;
+    aiIdleTopicMaxHour: number;
+    aiIdleTopicCooldownMinutes: number;
     aiSystemPrompt: string;
     aiActivePersona: string;
     aiPersonas: Schemastery.ObjectT<{
@@ -283,6 +299,12 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiEnableImageRecognition: boolean;
     aiImageMaxCount: number;
     aiImageBudgetMs: number;
+    aiWebSearchEnabled: boolean;
+    aiWebSearchMode: "auto" | "always" | "off";
+    aiWebSearchMaxResults: number;
+    aiWebSearchTimeoutMs: number;
+    aiWebSearchMaxPerHour: number;
+    aiWebSearchCacheMinutes: number;
     aiRequestTimeoutSeconds: number;
     aiDebugPrompt: boolean;
     aiIgnoreCommandMessage: boolean;

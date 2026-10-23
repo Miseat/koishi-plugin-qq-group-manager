@@ -56,6 +56,14 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
     pendingJoinRequestFlags: Map<any, any>;
     violationRecords: Map<any, any>;
     _imageDataUrlCache: Map<any, any>;
+    /** 定时提醒：id -> reminder */
+    _reminders: Map<any, any>;
+    /** 定时提醒：id -> timer */
+    _reminderTimers: Map<any, any>;
+    /** 群空闲话题：groupId -> timer */
+    _idleTimers: Map<any, any>;
+    /** 上次主动话题时间：groupId -> ts */
+    _lastIdleTopicAt: Map<any, any>;
     /** 记忆库写锁：串行化「读整档→改→整写」，防止并发写互相覆盖 */
     _memoryWriteLock: Promise<void>;
     /** 待审入群申请的落盘去抖定时器 */
@@ -110,6 +118,22 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
     ai: AiEngine;
     /** 外部插件扩展点：提示词风格段 + 输出过滤（接口版本见 AiHookRegistry.version） */
     get aiHooks(): import("./ai/hooks").AiHookRegistry;
+    reminderFilePath(): any;
+    loadReminders(): void;
+    saveReminders(): void;
+    clearReminderTimer(id: any): void;
+    scheduleReminder(reminder: any): void;
+    fireReminder(id: any): Promise<void>;
+    addReminder(reminder: any): void;
+    formatReminderTime(at: any): string;
+    sendReminderList(session: any): Promise<void>;
+    cancelReminder(session: any, id: any): Promise<void>;
+    handleReminderCommand(session: any, rest: any): Promise<boolean>;
+    handleReminderRequest(session: any): Promise<boolean>;
+    touchIdleTopic(session: any): void;
+    fireIdleTopic(groupId: any): Promise<void>;
+    sendGroupText(groupId: any, text: any): Promise<void>;
+    disposeSchedulers(): void;
     isPlatformAllowed(platform: any): any;
     sessionTag(session: any): string;
     styleText(text: any): any;
@@ -291,6 +315,8 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
     getOneBotApi(session: any): any;
     /** 供 AI 引擎抽取图片结构 */
     extractImages(session: any): any[];
+    /** 引用消息只带 messageId 时，用 OneBot get_msg 回查图片 */
+    fetchQuotedImages(session: any, quote: any): Promise<any[]>;
     /** 供 AI 引擎把图片引用转成 data URL */
     resolveImage(ref: any, session: any): Promise<any>;
     /** AI 回复发送：优先引用触发消息，失败则退化为纯文本 */
@@ -577,5 +603,10 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
         message: string;
     }>;
 }
+/** 解析“提醒/定时”文本；返回 { at, content } 或 null。纯函数，便于测试。 */
+export function parseReminderText(rawText: any, now?: number): {
+    at: number;
+    content: string;
+};
 import koishi_1 = require("koishi");
 import { AiEngine } from "./ai/engine";

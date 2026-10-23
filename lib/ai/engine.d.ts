@@ -21,6 +21,7 @@ export interface AiHost {
     getOneBotApi(session: any): any;
     toGroupId(session: any): number | null;
     extractImages(session: any): RenderedImage[];
+    fetchQuotedImages?(session: any, quote: any): Promise<RenderedImage[]>;
     resolveImage(ref: string, session: any): Promise<string>;
     sendReply(session: any, text: string): Promise<void>;
     readMemoryFile(): Promise<string>;
@@ -30,6 +31,7 @@ export interface AiDeps {
     state?: AiState;
     rng?: () => number;
     now?: () => number;
+    fetchImpl?: typeof fetch;
 }
 export declare class AiEngine {
     readonly state: AiState;
@@ -39,8 +41,12 @@ export declare class AiEngine {
     private names;
     private rng;
     private now;
+    private fetchImpl;
     private host;
     private config;
+    private searchCache;
+    private searchRate;
+    private searchUnsupportedUntil;
     constructor(host: AiHost, deps?: AiDeps);
     private groupKey;
     private ruleFor;
@@ -69,6 +75,10 @@ export declare class AiEngine {
     handle(session: any): Promise<void>;
     /** 供外部插件（如私聊插件）复用同一个模型 provider。 */
     chat(request: any): Promise<ChatResult>;
+    /** 群内长时间没人说话时，生成一条主动话题。 */
+    idleTopic(groupId: string): Promise<string>;
+    /** 需要时调用 DeepSeek Search API；失败/不支持/没结果都返回空串，继续普通回复。 */
+    private webSearch;
     private recentImageRecords;
     private collectImages;
     private judge;

@@ -31,6 +31,7 @@ Koishi 控制台「探索器 Explorer」里查看和手改。
 | **记忆库** | `[memory]` 保存 / 列出 / 查询 / 删除，落盘 `Memory.md`；开启后 AI 回复会检索并引用相关记忆 |
 | **AI 群聊回复** | 三道闸门（阈值 / 概率 / 冷却）+ 模型自行 `<pass/>` 决定是否接话；群名片、引用、@ 目标、自己历史发言都进上下文；记忆按相关度注入；图片并发解析并限时。多人格、点名后话题跟随、温度与输出上限 |
 | **AI 识图** | 图片下载转 data URL 后送入模型，兼容 CQ 码 / HTML `<img>` / 元素三种形态与表情包 |
+| **AI 联网搜索** | 按问题自动判断是否联网，调用 DeepSeek 原生 Search API（复用现有 API Key），结果注入提示词；API 不支持 / 超时 / 无结果时自动回退普通回复 |
 | **复读** | 连续相同消息达阈值复读，支持图片引用回查；复读事件会进入 AI 上下文 |
 | **娱乐** | 自我约束（口球）与违规禁言惩罚，可开关与调节参数 |
 
@@ -101,6 +102,12 @@ npm i @nestim/koishi-plugin-qq-group-manager
 | `aiReplyDecision` | `single` | `single` 一次调用（推荐）/ `two-stage` 两次调用 |
 | `aiMaxReplyChars` | `120` | 单条回复最大字符数 |
 | `aiImageBudgetMs` | `6000` | 图片解析总预算（毫秒），超时跳过 |
+| `aiWebSearchEnabled` | `true` | 启用联网搜索（DeepSeek Search API，复用 `aiApiKey`） |
+| `aiWebSearchMode` | `auto` | `auto` 自动判断 / `always` 每次都搜 / `off` 关闭 |
+| `aiWebSearchMaxResults` | `5` | 每次搜索取几条结果 |
+| `aiWebSearchTimeoutMs` | `4000` | 搜索请求超时（毫秒） |
+| `aiWebSearchMaxPerHour` | `10` | 每个群每小时最多搜索次数；0=不限 |
+| `aiWebSearchCacheMinutes` | `10` | 相同 query 的结果缓存分钟数 |
 | `aiDebugPrompt` | `false` | 把最终提示词写入日志，排查"答非所问" |
 | `dryRun` | `false` | 演练模式：只输出计划动作，不真正执行 |
 
@@ -127,6 +134,11 @@ npm i @nestim/koishi-plugin-qq-group-manager
 - **识图**：开启 `aiEnableImageRecognition` 后，图片并发下载并转为 data URL 再送入模型；
   总预算由 `aiImageBudgetMs` 控制（默认 6 秒），超时直接跳过，不再把回复拖到几十秒。
   模型不支持图片时会自动降级为纯文本并记住该结论，后续不再重复尝试。
+- **联网搜索**：`aiWebSearchMode: auto` 时，只有明确的问题/时效性内容才会触发。
+  调用当前 `aiBaseUrl` 的 DeepSeek Search API（`/v1/tools/search`），复用现有 `aiApiKey`，
+  不需要第三方搜索 Key；结果以 `【联网搜索结果】` 注入，模型一次回答。
+  API 不支持（400/401/403/404）、超时、没结果时会**自动放弃搜索**，继续普通模型调用。
+  默认每群每小时最多 10 次，相同 query 缓存 10 分钟。
 - **输出**：单条消息，`aiMaxReplyChars`（默认 120）限制长度；推荐 `aiTemperature` 0.7~0.9。
 - **调试**：`aiDebugPrompt` 打开后会把最终提示词写进日志，便于排查"到底看到了什么"。
 - **扩展点**：`ctx.nestimQqGroupManager.aiHooks`（接口版本 1）。外部插件可

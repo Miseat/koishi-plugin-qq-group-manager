@@ -26,6 +26,8 @@ export interface PromptInput {
   maxReplyChars: number;
   /** 外部插件追加的“说话风格”段（只影响表达方式） */
   styleSections?: string[];
+  /** 主插件联网搜索注入的事实段 */
+  webSearch?: string;
 }
 
 export const PASS_TOKEN = '<pass/>';
@@ -101,6 +103,11 @@ export function buildUserPrompt(input: PromptInput): string {
     for (const record of history) lines.push(renderRecordLine(record, selfName));
   } else {
     lines.push('(没有更早的消息)');
+  }
+
+  if (input.webSearch?.trim()) {
+    lines.push('');
+    lines.push(input.webSearch.trim());
   }
 
   lines.push('');

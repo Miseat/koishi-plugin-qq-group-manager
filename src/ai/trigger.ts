@@ -16,6 +16,10 @@ export interface TriggerInput {
   now: number;
   lastAttemptAt: number;
   minIntervalMs: number;
+  /** 上一次真正发出回复的时间（用于 @ 冷却） */
+  lastReplyAt: number;
+  /** 被 @ 后两次回复的最小间隔 */
+  mentionCooldownMs: number;
   inFlight: boolean;
   mention: boolean;
   followup: boolean;
@@ -31,7 +35,13 @@ export interface TriggerDecision {
 export function decideTrigger(input: TriggerInput): TriggerDecision {
   if (input.inFlight) return { fire: false, forced: false, reason: 'in-flight' };
 
-  if (input.mention) return { fire: true, forced: true, reason: 'direct-mention' };
+  if (input.mention) {
+    const cooldown = Math.max(0, Number(input.mentionCooldownMs) || 0);
+    if (cooldown > 0 && input.now - (Number(input.lastReplyAt) || 0) < cooldown) {
+      return { fire: false, forced: false, reason: 'mention-cooldown' };
+    }
+    return { fire: true, forced: true, reason: 'direct-mention' };
+  }
   if (input.followup) return { fire: true, forced: true, reason: 'followup' };
 
   if (input.minIntervalMs > 0 && input.now - input.lastAttemptAt < input.minIntervalMs) {

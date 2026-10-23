@@ -13,6 +13,8 @@ const base = {
   now: 1_000_000,
   lastAttemptAt: 0,
   minIntervalMs: 30_000,
+  lastReplyAt: 0,
+  mentionCooldownMs: 0,
   inFlight: false,
   mention: false,
   followup: false,
@@ -39,6 +41,19 @@ test('点名无视冷却与阈值', () => {
   });
   assert.equal(result.fire, true);
   assert.equal(result.forced, true);
+});
+
+test('点名冷却内不触发', () => {
+  const result = decideTrigger({
+    ...base,
+    counter: 0,
+    now: 1_010_000,
+    lastReplyAt: 1_000_000,
+    mentionCooldownMs: 30_000,
+    mention: true,
+  });
+  assert.equal(result.fire, false);
+  assert.equal(result.reason, 'mention-cooldown');
 });
 
 test('随机模式未掷中不触发', () => {

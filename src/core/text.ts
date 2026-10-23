@@ -18,6 +18,10 @@ export interface RenderedQuote {
   userId: string;
   name: string;
   text: string;
+  /** 被引用消息里的图片（用于“引用一张图再 @ bot”的场景） */
+  images: RenderedImage[];
+  /** 被引用消息的 messageId，拿不到图片时可用于 get_msg */
+  id: string;
 }
 
 export interface RenderedMessage {
@@ -321,12 +325,31 @@ async function renderQuote(
   if (!quote) return undefined;
   const content = String(quote.content ?? '').trim()
     || (Array.isArray(quote.elements) ? quote.elements.map((el: any) => el?.attrs?.content ?? '').join('') : '');
-  const text = truncate(stripTags(content), maxChars);
+  const images: RenderedImage[] = [];
+  const seen = new Set<string>();
+  const push = (img: RenderedImage | null) => {
+    if (!img) return;
+    const key = img.url || img.ref;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    images.push(img);
+  };
+  for (const el of Array.isArray(quote.elements) ? quote.elements : []) {
+    const type = String(el?.type ?? '').toLowerCase();
+    if (type === 'image' || type === 'img' || type === 'sticker' || type === 'mface') {
+      push(imageFromElement(el));
+    }
+  }
+  for (const match of content.matchAll(/\[CQ:image,[^\]]*\]/gi)) push(imageFromCq(match[0]));
+  for (const match of content.matchAll(/<img\b[^>]*\/?>/gi)) push(imageFromTag(match[0]));
+
+  const text = truncate(stripTags(content), maxChars) || (images.length ? '[图片]' : '');
   if (!text) return undefined;
   const userId = String(quote.user?.id ?? quote.userId ?? quote.author?.id ?? '');
   const rawName = quote.user?.name ?? quote.author?.nick ?? quote.author?.name ?? '';
   const name = String(rawName || (userId ? await resolveName(userId) : '') || '某人');
-  return { userId, name, text };
+  const id = String(quote.id ?? quote.messageId ?? quote.message_id ?? '');
+  return { userId, name, text, images, id };
 }
 
 export { truncate, stripTags };

@@ -22,6 +22,8 @@ export interface PromptInput {
     maxReplyChars: number;
     /** 外部插件追加的“说话风格”段（只影响表达方式） */
     styleSections?: string[];
+    /** 主插件联网搜索注入的事实段 */
+    webSearch?: string;
 }
 export declare const PASS_TOKEN = "<pass/>";
 export declare function renderRecordLine(record: ChatRecord, selfName: string): string;

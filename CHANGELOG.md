@@ -2,6 +2,35 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.2.7
+
+### 新增
+
+- **AI 联网搜索**：主插件在调用模型前按问题判断是否需要联网，调用 DeepSeek 原生 Search API
+  （`/v1/tools/search`，复用现有 `aiApiKey` / `aiBaseUrl`），把结果以 `【联网搜索结果】` 注入提示词，
+  模型一次回答。不需要第三方搜索 Key。
+- 搜索失败、API 不支持（400/401/403/404）、超时、没结果时**自动回退**为普通模型调用，不影响回复。
+- 新配置：`aiWebSearchEnabled`、`aiWebSearchMode`（auto/always/off）、`aiWebSearchMaxResults`、
+  `aiWebSearchTimeoutMs`、`aiWebSearchMaxPerHour`、`aiWebSearchCacheMinutes`。
+
+## 1.2.6
+
+### 新增
+
+- **定时提醒**：支持 `@bot 18:30提醒我吃饭`、`提醒我明天下午3点开会`、`10分钟后提醒我喝水`，
+  也支持 `[bot] 提醒 18:30 吃饭`；到点会在群里 @ 对方。提醒落盘到
+  `data/qqgm-reminders.json`，重启不丢；支持 `[bot] 提醒列表`、`[bot] 取消提醒 <id>`。
+- **群空闲话题**：`aiIdleTopicMinutes`（默认 120，0=关闭）、`aiIdleTopicMinHour`、
+  `aiIdleTopicMaxHour`、`aiIdleTopicCooldownMinutes`。群内长时间没人说话时主动抛一个话题，
+  只在开启 AI 的群里生效。
+- **被 @ 回复冷却**：`aiMentionCooldownSeconds`（默认 5 秒），连续 @ 不再每条都回。
+- 默认自称改为 `bot`，删除 MeowBot 默认；`aiAgentName` 仍可在配置页修改。
+
+### 修复
+
+- **引用图片**：被引用的消息里有图时，图片会解析并送进视觉模型；引用消息只带
+  `messageId` 时用 OneBot `get_msg` 回查，不再回“看不到图”。
+
 ## 1.2.5
 
 ### 新增

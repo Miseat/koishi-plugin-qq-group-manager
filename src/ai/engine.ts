@@ -21,6 +21,12 @@ import { selectMemoryBlocks, splitMemoryBlocks, tokenizeForMatch } from './memor
 import { NameResolver, MemberIdentity } from '../core/names';
 import { renderMessage, RenderedImage, truncate } from '../core/text';
 import { AiHookRegistry, AiHookContext } from './hooks';
+import {
+  buildSearchQuery,
+  fetchWebSearch,
+  shouldWebSearch,
+  WebSearchMode,
+} from './websearch';
 
 export interface AiHost {
   config: any;
@@ -28,6 +34,7 @@ export interface AiHost {
   getOneBotApi(session: any): any;
   toGroupId(session: any): number | null;
   extractImages(session: any): RenderedImage[];
+  fetchQuotedImages?(session: any, quote: any): Promise<RenderedImage[]>;
   resolveImage(ref: string, session: any): Promise<string>;
   sendReply(session: any, text: string): Promise<void>;
   readMemoryFile(): Promise<string>;
@@ -38,6 +45,7 @@ export interface AiDeps {
   state?: AiState;
   rng?: () => number;
   now?: () => number;
+  fetchImpl?: typeof fetch;
 }
 
 const PASS_RE = /^\s*<(?:pass\s*\/?|不回复)>/i;
@@ -82,8 +90,12 @@ export class AiEngine {
   private names: NameResolver;
   private rng: () => number;
   private now: () => number;
+  private fetchImpl: typeof fetch;
   private host: AiHost;
   private config: any;
+  private searchCache = new Map<string, { at: number; section: string }>();
+  private searchRate = new Map<string, number[]>();
+  private searchUnsupportedUntil = 0;
 
   constructor(host: AiHost, deps: AiDeps = {}) {
     this.host = host;
@@ -98,6 +110,7 @@ export class AiEngine {
     });
     this.rng = deps.rng ?? Math.random;
     this.now = deps.now ?? Date.now;
+    this.fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   }
 
   // ---------------------------------------------------------------- 配置
@@ -128,7 +141,7 @@ export class AiEngine {
 
   private get selfName(): string {
     const persona = this.activePersona();
-    return String(persona?.selfName || this.config.aiAgentName || 'MeowBot').trim() || 'MeowBot';
+    return String(persona?.selfName || this.config.aiAgentName || 'bot').trim() || 'bot';
   }
 
   private activePersona(): any {
@@ -396,6 +409,8 @@ export class AiEngine {
       now: this.now(),
       lastAttemptAt: state.lastAttemptAt,
       minIntervalMs: Math.max(0, Number(this.config.aiMinReplyIntervalSeconds ?? 45)) * 1000,
+      lastReplyAt: state.lastReplyAt || 0,
+      mentionCooldownMs: Math.max(0, Number(this.config.aiMentionCooldownSeconds ?? 5)) * 1000,
       inFlight: state.inFlight,
       mention,
       followup,
@@ -426,6 +441,7 @@ export class AiEngine {
         mode: 'reply',
       };
       const styleSections = await this.hooks.collectSections(hookCtx);
+      const webSearch = await this.webSearch(record, session);
       const promptInput = {
         selfName: this.selfName,
         persona: this.personaPrompt,
@@ -438,6 +454,7 @@ export class AiEngine {
         memories,
         maxReplyChars: this.maxReplyChars,
         styleSections,
+        webSearch,
       };
 
       if (allowPass && this.config.aiReplyDecision === 'two-stage') {
@@ -542,6 +559,104 @@ export class AiEngine {
     return this.provider.chat(request);
   }
 
+  /** 群内长时间没人说话时，生成一条主动话题。 */
+  async idleTopic(groupId: string): Promise<string> {
+    const session = { guildId: groupId, isDirect: false, platform: 'onebot' };
+    let sections: string[] = [];
+    try {
+      sections = await this.hooks.collectSections({ session, groupId, mode: 'reply' });
+    } catch { /* ignore */ }
+    const system = [
+      `你是 QQ 群 ${groupId} 里的一个普通成员。`,
+      '群里已经很久没人说话了。主动抛一个轻松、具体、能接话的话题，一句话。',
+      '不要问“在吗”，不要提“很久没人说话”，不要自我介绍。',
+      ...sections,
+    ].join('\n');
+    const result = await this.provider.chat({
+      system,
+      user: '现在发一条主动话题。',
+      temperature: Number(this.config.aiTemperature ?? 0.8),
+      maxTokens: Math.min(300, Number(this.config.aiMaxOutputTokens ?? 400)),
+    });
+    if (!result.ok || !result.text) return '';
+    const raw = String(result.text).trim();
+    if (!raw || PASS_RE.test(raw)) return '';
+    return clipReply(cleanReply(raw, this.selfName), this.maxReplyChars)
+      .replace(/\[表情[:：][^\]]*\]/g, '')
+      .trim();
+  }
+
+  /** 需要时调用 DeepSeek Search API；失败/不支持/没结果都返回空串，继续普通回复。 */
+  private async webSearch(record: ChatRecord, session: any): Promise<string> {
+    if (this.config.aiWebSearchEnabled === false) return '';
+    const mode = (this.config.aiWebSearchMode || 'auto') as WebSearchMode;
+    if (mode === 'off') return '';
+    const text = String(record.text || '');
+    if (!shouldWebSearch(text, mode)) return '';
+    const query = buildSearchQuery(text);
+    if (!query) return '';
+
+    const now = this.now();
+    if (this.searchUnsupportedUntil > now) return '';
+    const groupId = String(session?.guildId || '');
+    const maxPerHour = Math.max(0, Number(this.config.aiWebSearchMaxPerHour ?? 10));
+    if (maxPerHour > 0) {
+      const list = (this.searchRate.get(groupId) || []).filter((t) => now - t < 3600_000);
+      if (list.length >= maxPerHour) {
+        this.log('web-search', { ok: false, reason: 'rate-limit', groupId }, session);
+        return '';
+      }
+      list.push(now);
+      this.searchRate.set(groupId, list);
+    }
+
+    const cacheMinutes = Math.max(0, Number(this.config.aiWebSearchCacheMinutes ?? 10));
+    const cacheKey = `${String(this.config.aiBaseUrl || '')}|${query}`;
+    if (cacheMinutes > 0) {
+      const hit = this.searchCache.get(cacheKey);
+      if (hit && now - hit.at < cacheMinutes * 60_000) return hit.section;
+    }
+
+    const startedAt = this.now();
+    const outcome = await fetchWebSearch({
+      query,
+      apiKey: String(this.config.aiApiKey || ''),
+      baseUrl: String(this.config.aiBaseUrl || 'https://api.deepseek.com'),
+      maxResults: Number(this.config.aiWebSearchMaxResults ?? 5),
+      timeoutMs: Number(this.config.aiWebSearchTimeoutMs ?? 4000),
+      maxChars: 1800,
+    }, this.fetchImpl);
+
+    if (!outcome.ok) {
+      // 400/401/403/404 通常意味着这个 API 不支持 Search；10 分钟内不再重试
+      if (/^http-(400|401|403|404)$/.test(outcome.reason || '')) {
+        this.searchUnsupportedUntil = now + 10 * 60_000;
+      }
+      this.log('web-search', {
+        ok: false,
+        reason: outcome.reason,
+        query,
+        latencyMs: this.now() - startedAt,
+      }, session);
+      return '';
+    }
+
+    if (cacheMinutes > 0) {
+      this.searchCache.set(cacheKey, { at: now, section: outcome.section || '' });
+      if (this.searchCache.size > 100) {
+        const oldest = this.searchCache.keys().next().value;
+        if (oldest) this.searchCache.delete(oldest);
+      }
+    }
+    this.log('web-search', {
+      ok: true,
+      results: outcome.results?.length || 0,
+      query,
+      latencyMs: this.now() - startedAt,
+    }, session);
+    return outcome.section || '';
+  }
+
   private recentImageRecords(state: GroupState, record: ChatRecord, maxAgeMs = 120000): RenderedImage[] {
     const cutoff = Number(record.at) - maxAgeMs;
     const candidates = state.records
@@ -569,7 +684,13 @@ export class AiEngine {
     const own = record.images.length ? record.images : this.host.extractImages(session);
     // 用户常见的“先发图，再单独 @ 一句”：当前消息没有图，回看同一用户最近 2 分钟内的图
     const fallback = own.length ? [] : this.recentImageRecords(state, record);
-    const quoted = record.quote ? this.host.extractImages(session?.quote) : [];
+    let quoted: RenderedImage[] = record.quote
+      ? (record.quote.images?.length ? record.quote.images : this.host.extractImages(session?.quote))
+      : [];
+    // 引用消息里没解析到图（常见于 quote 只带 messageId）：用 get_msg 回查一次
+    if (!quoted.length && record.quote?.id && typeof this.host.fetchQuotedImages === 'function') {
+      quoted = await this.host.fetchQuotedImages(session, record.quote);
+    }
     const items = pickImages([...own, ...fallback], quoted, maxCount);
     if (!items.length) return [];
 

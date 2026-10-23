@@ -15,6 +15,10 @@ export interface TriggerInput {
     now: number;
     lastAttemptAt: number;
     minIntervalMs: number;
+    /** 上一次真正发出回复的时间（用于 @ 冷却） */
+    lastReplyAt: number;
+    /** 被 @ 后两次回复的最小间隔 */
+    mentionCooldownMs: number;
     inFlight: boolean;
     mention: boolean;
     followup: boolean;

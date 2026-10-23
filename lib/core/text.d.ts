@@ -15,6 +15,10 @@ export interface RenderedQuote {
     userId: string;
     name: string;
     text: string;
+    /** 被引用消息里的图片（用于“引用一张图再 @ bot”的场景） */
+    images: RenderedImage[];
+    /** 被引用消息的 messageId，拿不到图片时可用于 get_msg */
+    id: string;
 }
 export interface RenderedMessage {
     /** 已渲染的正文（含 @名字 / [图片] 等占位） */
