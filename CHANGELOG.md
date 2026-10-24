@@ -2,6 +2,17 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.3.0
+
+### 新增
+
+- **回复引用可随机化**：新增 `aiQuoteReplyMode`（`random` / `always` / `never`）与
+  `aiQuoteReplyProbability`（默认 0.5）。不再强制每条回复都引用触发消息，
+  更像正常群友插话。
+- **读取合并转发**：`aiReadForwardMessage`（默认开）+ `aiForwardMaxNodes`（默认 20）。
+  通过 OneBot `get_forward_msg` 拉取子消息，按“发言人: 内容”逐行注入上下文；
+  适配器不支持或失败时降级为 `[合并转发]` 占位。
+
 ## 1.2.9
 
 ### 变更

@@ -24,6 +24,12 @@ export interface RenderedQuote {
   id: string;
 }
 
+/** 合并转发：只保留 id 和摘要，正文由引擎按需向 OneBot 拉取 */
+export interface RenderedForward {
+  id: string;
+  summary: string;
+}
+
 export interface RenderedMessage {
   /** 已渲染的正文（含 @名字 / [图片] 等占位） */
   text: string;
@@ -31,6 +37,8 @@ export interface RenderedMessage {
   images: RenderedImage[];
   /** 引用（被回复）的那条消息 */
   quote?: RenderedQuote;
+  /** 本条消息里的合并转发（可再拉取子消息内容） */
+  forwards: RenderedForward[];
   /** 正文里点名到的 QQ 号（不含 bot 自己） */
   mentions: string[];
   /** 本条消息是否 @ 了 bot（与 session.content 的格式无关） */
@@ -182,6 +190,17 @@ function renderFromContent(
   return { text: stripTags(text), images, mentions };
 }
 
+/** 从合并转发元素里抽 id 与摘要（napcat 常见字段：id / resid / content / summary） */
+function forwardFromElement(el: any): RenderedForward | null {
+  const attrs = el?.attrs ?? el ?? {};
+  const id = String(
+    attrs.id ?? attrs.resid ?? attrs.resId ?? attrs.forwardId ?? attrs.content ?? '',
+  ).trim();
+  if (!id) return null;
+  const summary = String(attrs.summary ?? attrs.title ?? attrs.name ?? attrs.desc ?? '').trim();
+  return { id, summary };
+}
+
 /**
  * 渲染一条消息。
  * - @ 会解析成群名片（`@你` 表示 @bot）
@@ -197,6 +216,7 @@ export async function renderMessage(
   const quoteMax = options.quoteMaxChars ?? 60;
   const elements: any[] = Array.isArray(session?.elements) ? session.elements : [];
   const images: RenderedImage[] = [];
+  const forwards: RenderedForward[] = [];
   const mentions: string[] = [];
   const parts: string[] = [];
   let atBot = false;
@@ -205,9 +225,16 @@ export async function renderMessage(
     const fallback = renderFromContent(String(session?.content ?? ''), selfId, resolveName);
     // 兜底路径无法异步解析 @ 名字，尽力把 html 里的 name 用上
     const withNames = await replaceMentionsWithNames(fallback.text, resolveName, selfId);
+    const forwardsFromCq: RenderedForward[] = [];
+    for (const match of String(session?.content ?? '').matchAll(/\[CQ:(?:forward|node),([^\]]*)\]/gi)) {
+      const attrs = cqAttrs(match[0]);
+      const id = String(attrs.id ?? attrs.resid ?? attrs.content ?? '').trim();
+      if (id) forwardsFromCq.push({ id, summary: String(attrs.summary ?? '') });
+    }
     return {
       text: withNames.text,
       images: fallback.images,
+      forwards: forwardsFromCq,
       mentions: [...new Set([...fallback.mentions, ...withNames.mentions])],
       atBot: !!selfId && (fallback.text.includes('@你')
         || fallback.text.includes(`<at id="${selfId}"`)
@@ -262,6 +289,8 @@ export async function renderMessage(
       continue;
     }
     if (FORWARD_TYPES.has(type)) {
+      const forward = forwardFromElement(el);
+      if (forward) forwards.push(forward);
       parts.push(' [合并转发] ');
       continue;
     }
@@ -289,6 +318,7 @@ export async function renderMessage(
     text,
     images,
     quote,
+    forwards,
     mentions: [...new Set(mentions)],
     atBot,
     plain: text,

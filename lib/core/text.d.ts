@@ -20,6 +20,11 @@ export interface RenderedQuote {
     /** 被引用消息的 messageId，拿不到图片时可用于 get_msg */
     id: string;
 }
+/** 合并转发：只保留 id 和摘要，正文由引擎按需向 OneBot 拉取 */
+export interface RenderedForward {
+    id: string;
+    summary: string;
+}
 export interface RenderedMessage {
     /** 已渲染的正文（含 @名字 / [图片] 等占位） */
     text: string;
@@ -27,6 +32,8 @@ export interface RenderedMessage {
     images: RenderedImage[];
     /** 引用（被回复）的那条消息 */
     quote?: RenderedQuote;
+    /** 本条消息里的合并转发（可再拉取子消息内容） */
+    forwards: RenderedForward[];
     /** 正文里点名到的 QQ 号（不含 bot 自己） */
     mentions: string[];
     /** 本条消息是否 @ 了 bot（与 session.content 的格式无关） */

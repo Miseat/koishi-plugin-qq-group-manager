@@ -319,7 +319,7 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
     fetchQuotedImages(session: any, quote: any): Promise<any[]>;
     /** 供 AI 引擎把图片引用转成 data URL */
     resolveImage(ref: any, session: any): Promise<any>;
-    /** AI 回复发送：优先引用触发消息，失败则退化为纯文本 */
+    /** AI 回复发送：按 aiQuoteReplyMode 决定是否引用触发消息，失败则退化为纯文本 */
     sendReply(session: any, text: any): Promise<void>;
     extractTextForFilter(session: any): any;
     hasTextContent(session: any): boolean;

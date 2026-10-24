@@ -17,6 +17,8 @@ export interface ChatRecord {
   text: string;
   images: RenderedImage[];
   quote?: RenderedQuote;
+  /** 合并转发子消息的渲染文本（读不到时为空） */
+  forwardText?: string;
   /** 本条消息 @ 到的 QQ 号（不含 bot 自己） */
   mentions: string[];
   /** 本条消息是否 @ 了 bot */

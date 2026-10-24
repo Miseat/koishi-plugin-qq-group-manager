@@ -81,6 +81,8 @@ export declare class AiEngine {
     private webSearch;
     /** 模型自己都说不知道/搜不了时，补一次搜索再重写；只在不认识的问题上多一次调用。 */
     private shouldReviseWithSearch;
+    /** 读取合并转发的子消息，压成一行行文本；读不到就返回空串。 */
+    private readForwards;
     private recentImageRecords;
     private collectImages;
     private judge;

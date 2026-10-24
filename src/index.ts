@@ -134,6 +134,14 @@ export const Config = Schema.intersect([
         aiTemperature: Schema.number().min(0).max(2).step(0.1).default(0.8).description('生成温度（0~2）。群聊接话建议 0.7~0.9，过高会跑题、复述、发散。'),
         aiMaxOutputTokens: Schema.natural().default(400).description('AI 最大输出 token 数。群聊一句话不需要太大，过大会增加延迟。'),
         aiMaxReplyChars: Schema.natural().min(20).max(500).default(120).description('单条回复的最大字符数，超出会在句末截断。'),
+        aiQuoteReplyMode: Schema.union([
+            Schema.const('random').description('随机决定'),
+            Schema.const('always').description('总是引用'),
+            Schema.const('never').description('从不引用'),
+        ]).role('radio').default('random').description('AI 回复是否引用触发它的那条消息。'),
+        aiQuoteReplyProbability: Schema.number().min(0).max(1).step(0.05).default(0.5).hidden().description('引用概率（仅 random 模式生效）。'),
+        aiReadForwardMessage: Schema.boolean().default(true).description('读取合并转发聊天记录的内容，作为上下文的一部分。'),
+        aiForwardMaxNodes: Schema.natural().min(1).max(50).default(20).description('单条合并转发最多读取多少条子消息。'),
         aiReplyDecision: Schema.union([
             Schema.const('single').description('一次调用：模型直接输出回复，或用 <pass/> 放弃（推荐）'),
             Schema.const('two-stage').description('两次调用：先判定是否值得回复，再生成正文'),

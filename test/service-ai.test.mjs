@@ -28,6 +28,8 @@ function config(overrides = {}) {
     aiTemperature: 0.8,
     aiMaxOutputTokens: 200,
     aiMaxReplyChars: 80,
+    aiQuoteReplyMode: 'always',
+    aiQuoteReplyProbability: 1,
     aiEnableImageRecognition: false,
     aiImageMaxCount: 0,
     aiEnableFollowupAfterMention: false,

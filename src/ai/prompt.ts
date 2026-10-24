@@ -69,7 +69,10 @@ export function renderRecordLine(record: ChatRecord, selfName: string): string {
     ? `「回复 ${record.quote.name}：${truncate(record.quote.text, 40)}」`
     : '';
   const body = quote ? `${quote}${record.text}` : record.text;
-  return `[${time}] ${speaker(record, selfName)}: ${body || '[空消息]'}`;
+  const forward = record.forwardText
+    ? `\n    └ 转发内容：\n${record.forwardText.split('\n').map((line) => `      ${truncate(line, 120)}`).join('\n')}`
+    : '';
+  return `[${time}] ${speaker(record, selfName)}: ${body || '[空消息]'}${forward}`;
 }
 
 export function buildSystemPrompt(input: PromptInput): string {

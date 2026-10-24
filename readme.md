@@ -101,6 +101,10 @@ npm i @nestim/koishi-plugin-qq-group-manager
 | `aiContextWindow` | `30` | 进入提示词的消息条数（建议 20~40） |
 | `aiReplyDecision` | `single` | `single` 一次调用（推荐）/ `two-stage` 两次调用 |
 | `aiMaxReplyChars` | `120` | 单条回复最大字符数 |
+| `aiQuoteReplyMode` | `random` | 回复是否引用触发消息：`random` / `always` / `never` |
+| `aiQuoteReplyProbability` | `0.5` | `random` 模式下的引用概率 |
+| `aiReadForwardMessage` | `true` | 读取合并转发聊天记录作为上下文 |
+| `aiForwardMaxNodes` | `20` | 单条合并转发最多读取多少条子消息 |
 | `aiImageBudgetMs` | `6000` | 图片解析总预算（毫秒），超时跳过 |
 | `aiWebSearchEnabled` | `true` | 启用联网搜索（DeepSeek Search API，复用 `aiApiKey`） |
 | `aiWebSearchMode` | `auto` | `auto` 自动判断 / `always` 每次都搜 / `off` 关闭 |
@@ -141,6 +145,11 @@ npm i @nestim/koishi-plugin-qq-group-manager
   如果模型第一次回答表示“不知道/记不清/搜不了”，会补一次搜索并重写最终回复（仅此时多一次模型调用）。
   默认每群每小时最多 10 次，相同 query 缓存 10 分钟。
 - **输出**：单条消息，`aiMaxReplyChars`（默认 120）限制长度；推荐 `aiTemperature` 0.7~0.9。
+  `aiQuoteReplyMode` 控制是否引用触发消息：`random`（默认，按 `aiQuoteReplyProbability` 掷骰）、
+  `always`、`never`。不引用时直接发到群里，不会出现"每条都挂一条引用"的机械感。
+- **合并转发**：开启 `aiReadForwardMessage` 后，消息里的合并转发会通过 OneBot `get_forward_msg`
+  拉取子消息，按“发言人: 内容”逐行注入上下文（最多 `aiForwardMaxNodes` 条）。
+  适配器不支持或拉取失败时降级为 `[合并转发]` 占位，不影响正常回复。
 - **调试**：`aiDebugPrompt` 打开后会把最终提示词写进日志，便于排查"到底看到了什么"。
 - **扩展点**：`ctx.nestimQqGroupManager.aiHooks`（接口版本 1）。外部插件可
   `registerPromptSection()` 追加风格段、`registerOutputFilter()` 过滤或丢弃输出；

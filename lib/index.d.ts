@@ -145,6 +145,10 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiTemperature: Schema<number, number>;
     aiMaxOutputTokens: Schema<number, number>;
     aiMaxReplyChars: Schema<number, number>;
+    aiQuoteReplyMode: Schema<"random" | "always" | "never", "random" | "always" | "never">;
+    aiQuoteReplyProbability: Schema<number, number>;
+    aiReadForwardMessage: Schema<boolean, boolean>;
+    aiForwardMaxNodes: Schema<number, number>;
     aiReplyDecision: Schema<"two-stage" | "single", "two-stage" | "single">;
     aiEnableImageRecognition: Schema<boolean, boolean>;
     aiImageMaxCount: Schema<number, number>;
@@ -292,6 +296,10 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiTemperature: number;
     aiMaxOutputTokens: number;
     aiMaxReplyChars: number;
+    aiQuoteReplyMode: "random" | "always" | "never";
+    aiQuoteReplyProbability: number;
+    aiReadForwardMessage: boolean;
+    aiForwardMaxNodes: number;
     aiReplyDecision: "two-stage" | "single";
     aiEnableImageRecognition: boolean;
     aiImageMaxCount: number;
