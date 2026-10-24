@@ -495,3 +495,34 @@ test('普通聊天不触发搜索', async () => {
   await engine.handle(textSession('今天好累'));
   assert.equal(called, 0);
 });
+
+test('模型说不知道时补一次搜索并重写', async () => {
+  const config = makeConfig({ aiMessageThreshold: 99, aiWebSearchEnabled: true });
+  const provider = makeProvider(() => (
+    provider.calls.length === 1 ? '这个我记不清了' : '查到了，白面具是带土。'
+  ));
+  let fetched = 0;
+  const fetchImpl = async () => {
+    fetched += 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: [{
+          title: '白面具',
+          url: 'https://example.test/mask',
+          summary: '白面具是带土',
+          site_name: '测试站点',
+          date: '',
+        }],
+      }),
+    };
+  };
+  const host = makeHost(config);
+  const engine = new AiEngine(host, { provider, fetchImpl });
+  await engine.handle(mentionSession('白面具'));
+  assert.equal(fetched, 1);
+  assert.equal(provider.calls.length, 2);
+  assert.match(host.sent[0].text, /查到了/);
+  assert.doesNotMatch(host.sent[0].text, /记不清/);
+});

@@ -138,6 +138,7 @@ npm i @nestim/koishi-plugin-qq-group-manager
   调用当前 `aiBaseUrl` 的 DeepSeek Search API（`/v1/tools/search`），复用现有 `aiApiKey`，
   不需要第三方搜索 Key；结果以 `【联网搜索结果】` 注入，模型一次回答。
   API 不支持（400/401/403/404）、超时、没结果时会**自动放弃搜索**，继续普通模型调用。
+  如果模型第一次回答表示“不知道/记不清/搜不了”，会补一次搜索并重写最终回复（仅此时多一次模型调用）。
   默认每群每小时最多 10 次，相同 query 缓存 10 分钟。
 - **输出**：单条消息，`aiMaxReplyChars`（默认 120）限制长度；推荐 `aiTemperature` 0.7~0.9。
 - **调试**：`aiDebugPrompt` 打开后会把最终提示词写进日志，便于排查"到底看到了什么"。

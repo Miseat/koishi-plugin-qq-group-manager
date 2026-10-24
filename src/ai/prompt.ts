@@ -28,6 +28,8 @@ export interface PromptInput {
   styleSections?: string[];
   /** 主插件联网搜索注入的事实段 */
   webSearch?: string;
+  /** 是否启用联网搜索（用于提示模型正确理解搜索结果） */
+  webSearchEnabled?: boolean;
 }
 
 export const PASS_TOKEN = '<pass/>';
@@ -78,6 +80,9 @@ export function buildSystemPrompt(input: PromptInput): string {
   lines.push('必须遵守：');
   for (const rule of RULE_LINES) lines.push(`- ${rule}`);
   lines.push(`- 控制在 ${Math.max(20, input.maxReplyChars)} 个字以内，通常一两句话就够。`);
+  if (input.webSearchEnabled) {
+    lines.push('- 系统会在需要时提供【联网搜索结果】；有就直接参考，没有就按已有知识回答，不要说自己“没法上网”或“被限制”。');
+  }
 
   if (input.styleSections?.length) {
     lines.push('');

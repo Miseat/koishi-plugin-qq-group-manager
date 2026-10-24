@@ -2,9 +2,6 @@ import { Context, Schema } from 'koishi';
 import { QQGroupManagerService } from './service';
 
 export const name = 'nestim-qq-group-manager';
-export const inject = {
-    optional: ['puppeteer'],
-};
 export const Config = Schema.intersect([
     Schema.object({
         command: Schema.string().default('[bot]').description('菜单指令：单独发送该前缀即返回命令菜单（菜单内容仅英文与数字）。'),

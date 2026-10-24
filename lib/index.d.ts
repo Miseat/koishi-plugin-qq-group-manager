@@ -1,8 +1,5 @@
 import { Context, Schema } from 'koishi';
 export declare const name = "nestim-qq-group-manager";
-export declare const inject: {
-    optional: string[];
-};
 export declare const Config: Schema<Schemastery.ObjectS<{
     command: Schema<string, string>;
     cmdMute: Schema<string, string>;

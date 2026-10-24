@@ -24,6 +24,8 @@ export interface PromptInput {
     styleSections?: string[];
     /** 主插件联网搜索注入的事实段 */
     webSearch?: string;
+    /** 是否启用联网搜索（用于提示模型正确理解搜索结果） */
+    webSearchEnabled?: boolean;
 }
 export declare const PASS_TOKEN = "<pass/>";
 export declare function renderRecordLine(record: ChatRecord, selfName: string): string;

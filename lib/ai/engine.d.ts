@@ -79,6 +79,8 @@ export declare class AiEngine {
     idleTopic(groupId: string): Promise<string>;
     /** 需要时调用 DeepSeek Search API；失败/不支持/没结果都返回空串，继续普通回复。 */
     private webSearch;
+    /** 模型自己都说不知道/搜不了时，补一次搜索再重写；只在不认识的问题上多一次调用。 */
+    private shouldReviseWithSearch;
     private recentImageRecords;
     private collectImages;
     private judge;

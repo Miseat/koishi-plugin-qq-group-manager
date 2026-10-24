@@ -24,8 +24,21 @@ test('off/always 模式', () => {
 });
 
 test('query 去掉搜索前缀并截断', () => {
-  assert.equal(buildSearchQuery('搜一下今天的新闻'), '今天的新闻');
+  const q = buildSearchQuery('搜一下今天的新闻');
+  assert.match(q, /^今天的新闻/);
+  assert.match(q, /after:\d{4}-\d{2}-\d{2}$/);
   assert.equal(buildSearchQuery('@bot 查一下 DeepSeek 最新消息').length <= 128, true);
+});
+
+test('去掉 @、取问题分句，并给“今天”加时间过滤', () => {
+  const q = buildSearchQuery('@你 现在是几点几分，今天的大事件是什么');
+  assert.doesNotMatch(q, /@你/);
+  assert.match(q, /今天的大事件是什么/);
+  assert.match(q, /after:\d{4}-\d{2}-\d{2}/);
+});
+
+test('问“会不会联网”不触发搜索', () => {
+  assert.equal(shouldWebSearch('你就不会联网搜索吗'), false);
 });
 
 test('搜索结果格式化为带编号的资料段', () => {

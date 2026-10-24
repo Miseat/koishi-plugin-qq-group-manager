@@ -14,7 +14,7 @@
 
 import { AiState, GroupState, ChatRecord, FollowupState } from './state';
 import { decideTrigger } from './trigger';
-import { buildJudgePrompt, buildReplyPrompt, PASS_TOKEN } from './prompt';
+import { buildJudgePrompt, buildReplyPrompt, buildUserPrompt, PASS_TOKEN } from './prompt';
 import { ChatProvider, ChatResult } from './provider';
 import { pickImages, resolveImages } from './vision';
 import { selectMemoryBlocks, splitMemoryBlocks, tokenizeForMatch } from './memory';
@@ -455,6 +455,7 @@ export class AiEngine {
         maxReplyChars: this.maxReplyChars,
         styleSections,
         webSearch,
+        webSearchEnabled: this.config.aiWebSearchEnabled !== false,
       };
 
       if (allowPass && this.config.aiReplyDecision === 'two-stage') {
@@ -501,8 +502,27 @@ export class AiEngine {
         return;
       }
 
-      const cleaned = cleanReply(raw, this.selfName);
-      if (!cleaned) {
+      let finalRaw = raw;
+      if (!webSearch && this.shouldReviseWithSearch(raw)) {
+        const revisedSearch = await this.webSearch(record, session, true);
+        if (revisedSearch) {
+          const revisedInput = { ...promptInput, webSearch: revisedSearch };
+          const revisedUser = `${buildUserPrompt(revisedInput)}\n\n你刚才的回答是：「${truncate(finalRaw, 120)}」。现在补上了联网搜索结果，请根据结果重写最终回复；不要提“刚才/搜索/系统”，直接给答案。`;
+          const revised = await this.provider.chat({
+            system: prompt.system,
+            user: revisedUser,
+            images,
+            temperature: Number(this.config.aiTemperature ?? 0.8),
+            maxTokens: Number(this.config.aiMaxOutputTokens ?? 400),
+          });
+          if (revised.ok && revised.text && !PASS_RE.test(revised.text.trim())) {
+            finalRaw = revised.text.trim();
+            this.log('web-search', { ok: true, revised: true, query: buildSearchQuery(record.text) }, session);
+          }
+        }
+      }
+
+      const cleaned = cleanReply(finalRaw, this.selfName);      if (!cleaned) {
         state.counter = 0;
         return;
       }
@@ -587,12 +607,12 @@ export class AiEngine {
   }
 
   /** 需要时调用 DeepSeek Search API；失败/不支持/没结果都返回空串，继续普通回复。 */
-  private async webSearch(record: ChatRecord, session: any): Promise<string> {
+  private async webSearch(record: ChatRecord, session: any, force = false): Promise<string> {
     if (this.config.aiWebSearchEnabled === false) return '';
     const mode = (this.config.aiWebSearchMode || 'auto') as WebSearchMode;
     if (mode === 'off') return '';
     const text = String(record.text || '');
-    if (!shouldWebSearch(text, mode)) return '';
+    if (!force && !shouldWebSearch(text, mode)) return '';
     const query = buildSearchQuery(text);
     if (!query) return '';
 
@@ -655,6 +675,13 @@ export class AiEngine {
       latencyMs: this.now() - startedAt,
     }, session);
     return outcome.section || '';
+  }
+
+  /** 模型自己都说不知道/搜不了时，补一次搜索再重写；只在不认识的问题上多一次调用。 */
+  private shouldReviseWithSearch(raw: string): boolean {
+    if (this.config.aiWebSearchEnabled === false) return false;
+    if (String(this.config.aiWebSearchMode || 'auto') === 'off') return false;
+    return /(不知道|记不清|记不准|记不牢|不敢乱说|说岔|没法上网|查不了|搜不了|没有联网|无法联网|不确定|不太清楚|分不清|瞎猜)/.test(raw);
   }
 
   private recentImageRecords(state: GroupState, record: ChatRecord, maxAgeMs = 120000): RenderedImage[] {
