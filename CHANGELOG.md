@@ -2,6 +2,15 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.3.1
+
+### 文档
+
+- README 增加配套插件跳转：`@nestim/koishi-plugin-qqgm-chat-style`（聊天风格）与
+  `@nestim/koishi-plugin-qqgm-meme`（表情包），以及两个可直接使用的聊天风格 skill
+  （`northern-netizen-chat`、`naruto-mobile-chat`）。
+- 明确标注**定时提醒内建在本插件**，无需额外安装。
+
 ## 1.3.0
 
 ### 新增
