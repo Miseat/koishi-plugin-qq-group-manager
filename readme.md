@@ -154,7 +154,14 @@ npm i @nestim/koishi-plugin-qq-group-manager
 - **扩展点**：`ctx.nestimQqGroupManager.aiHooks`（接口版本 1）。外部插件可
   `registerPromptSection()` 追加风格段、`registerOutputFilter()` 过滤或丢弃输出；
   钩子异常会被隔离，不影响正常回复。跨插件使用时请注入 root 上的 `qqgmAiHooks`。
-  配套的本地风格插件 `koishi-plugin-qqgm-chat-style` 不随本包发布，按需单独部署。
+  配套插件已单独发布，按需安装：
+
+| 插件 | 作用 | 地址 |
+| --- | --- | --- |
+| `@nestim/koishi-plugin-qqgm-chat-style` | 聊天风格：一个主风格 + 多个按概率随机叠加的追加风格 | [npm](https://www.npmjs.com/package/@nestim/koishi-plugin-qqgm-chat-style) · [GitHub](https://github.com/Miseat/koishi-plugin-qqgm-chat-style) |
+| `@nestim/koishi-plugin-qqgm-meme` | 表情包：AI 用 `[表情: 情绪]` 抽图，按概率补在文字后面 | [npm](https://www.npmjs.com/package/@nestim/koishi-plugin-qqgm-meme) · [GitHub](https://github.com/Miseat/koishi-plugin-qqgm-meme) |
+
+  定时提醒（`[提醒] 明天 8 点 开会`）**内建在本插件里**，不需要额外安装。
 
 ## 外部插件接口（1.2.2+）
 
@@ -322,6 +329,24 @@ Moderation commands (`[mute]` `[unmute]` `[kick]` `[ban]` `[unban]` `[banlist]`)
 
 Both steps must pass. Authorization details and command results are written to logs only and
 are never echoed into the group.
+
+## 相关插件 / Related plugins
+
+主插件是这套东西的核心，其余插件都通过它暴露的 `qqgmAiHooks` 挂上来，可以自由组合：
+
+| 插件 | 作用 | 链接 |
+| --- | --- | --- |
+| **`@nestim/koishi-plugin-qq-group-manager`** | 本包：群管、消息管控、自动处罚、黑名单、入群审核、记忆库、AI 回复、识图、联网搜索、定时提醒 | [npm](https://www.npmjs.com/package/@nestim/koishi-plugin-qq-group-manager) · [GitHub](https://github.com/Miseat/koishi-plugin-qq-group-manager) |
+| `@nestim/koishi-plugin-qqgm-chat-style` | 聊天风格：一个主风格决定人设，多个追加风格按各自概率随机加味，主风格永远优先 | [npm](https://www.npmjs.com/package/@nestim/koishi-plugin-qqgm-chat-style) · [GitHub](https://github.com/Miseat/koishi-plugin-qqgm-chat-style) |
+| `@nestim/koishi-plugin-qqgm-meme` | 表情包：AI 用 `[表情: 情绪]` 表达想发哪类图，按概率从本地图库抽一张补在文字后面 | [npm](https://www.npmjs.com/package/@nestim/koishi-plugin-qqgm-meme) · [GitHub](https://github.com/Miseat/koishi-plugin-qqgm-meme) |
+
+配套的聊天风格 skill（可直接放进 `data/chat-styles/`）：
+
+- [northern-netizen-chat](https://github.com/Miseat/northern-netizen-chat) —— 中文北方网友，短句、带刺、归因降维
+- [naruto-mobile-chat](https://github.com/Miseat/naruto-mobile-chat) —— 火影忍者手游圈口癖，适合当追加风格
+
+All companion plugins attach through the `qqgmAiHooks` extension point this package exposes,
+so you can mix and match. Timing reminders are built in — no extra package needed.
 
 ## License
 
