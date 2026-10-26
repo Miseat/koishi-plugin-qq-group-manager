@@ -168,6 +168,7 @@ npm i @nestim/koishi-plugin-qq-group-manager
 | --- | --- | --- |
 | `@nestim/koishi-plugin-qqgm-chat-style` | 聊天风格：一个主风格 + 多个按概率随机叠加的追加风格 | [npm](https://www.npmjs.com/package/@nestim/koishi-plugin-qqgm-chat-style) · [GitHub](https://github.com/Miseat/koishi-plugin-qqgm-chat-style) |
 | `@nestim/koishi-plugin-qqgm-meme` | 表情包：AI 用 `[表情: 情绪]` 抽图，按概率补在文字后面 | [npm](https://www.npmjs.com/package/@nestim/koishi-plugin-qqgm-meme) · [GitHub](https://github.com/Miseat/koishi-plugin-qqgm-meme) |
+| `@nestim/koishi-plugin-qqgm-private` | 私聊：AI 自动回复 + 定时主动私发 | [npm](https://www.npmjs.com/package/@nestim/koishi-plugin-qqgm-private) · [GitHub](https://github.com/Miseat/koishi-plugin-qqgm-private) |
 
   定时提醒（`[提醒] 明天 8 点 开会`）**内建在本插件里**，不需要额外安装。
 
