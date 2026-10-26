@@ -47,14 +47,17 @@ export class GroupState {
   followup: FollowupState | null = null;
   seen = new Map<string, number>();
 
-  trim(window: number): void {
+  /** 挤压上下文，返回被挤出的消息（按时间先后）。 */
+  trim(window: number): ChatRecord[] {
     const max = Math.max(6, window || 24);
-    if (this.records.length > max) this.records.splice(0, this.records.length - max);
+    if (this.records.length <= max) return [];
+    return this.records.splice(0, this.records.length - max);
   }
 
-  push(record: ChatRecord, window: number): void {
+  /** @returns 本次被挤出的消息，供外部做归纳 */
+  push(record: ChatRecord, window: number): ChatRecord[] {
     this.records.push(record);
-    this.trim(window);
+    return this.trim(window);
   }
 
   /** 事件去重：同一 messageId 15 秒内只处理一次 */

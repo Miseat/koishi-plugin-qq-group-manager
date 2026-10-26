@@ -189,9 +189,25 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
         qq: string;
         name: string;
     }>;
-    getMemoryFilePath(): any;
-    readMemoryFile(): Promise<any>;
-    writeMemoryFile(content: any): Promise<void>;
+    /**
+     * 记忆按作用域分文件：
+     *   群聊 → Memory_<群号>_群聊.md
+     *   私聊 → Memory_<QQ号>_私聊.md
+     *
+     * scope 为空时回落到旧的单文件（memoryFileName），保持兼容。
+     * @param {{kind:'group'|'private', id:string}|null} scope
+     */
+    getMemoryFilePath(scope: {
+        kind: "group" | "private";
+        id: string;
+    } | null): any;
+    /** 把 session 归一成作用域；群聊取群号，私聊取对方 QQ 号。 */
+    memoryScopeOf(session: any): {
+        kind: string;
+        id: string;
+    };
+    readMemoryFile(scope: any): Promise<any>;
+    writeMemoryFile(content: any, scope: any): Promise<void>;
     extractMemoryBlocks(content: any): string[];
     /**
      * 记忆库写互斥：把「读整档 → 改 → 整写」串行化。
@@ -199,10 +215,20 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
      * 记忆属于低频写，一把 promise 队列足够，无需文件锁。
      */
     runMemoryWriteLocked(task: any): Promise<any>;
-    saveMemoryToFile(userId: any, content: any): Promise<any>;
-    searchMemory(keyword: any, limit?: number): Promise<string[]>;
+    /**
+     * 追加一条记忆。
+     * @param {string} userId 写入者（旧字段，保留用于标记）
+     * @param {string} content 记忆正文
+     * @param {{kind:'group'|'private', id:string}|null} scope 作用域；为空则写旧单文件
+     * @param {string} [label] 自定义来源标记，例如「自动归纳」
+     */
+    saveMemoryToFile(userId: string, content: string, scope: {
+        kind: "group" | "private";
+        id: string;
+    } | null, label?: string): Promise<any>;
+    searchMemory(keyword: any, limit: number, scope: any): Promise<string[]>;
     /** 按关键词删除记忆条目（含该关键词的整条记忆块）。返回 { ok, removed, message } */
-    deleteMemoryByKeyword(keyword: any): Promise<any>;
+    deleteMemoryByKeyword(keyword: any, scope: any): Promise<any>;
     getDisplayName(session: any): any;
     splitAiReplyParts(text: any): any;
     waitHumanLikeDelay(minMs?: number, maxMs?: number): Promise<void>;
@@ -360,7 +386,7 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
      * 短关键词（2~4 字）极易被无关文本凑齐（如「领导说…红色包装袋」凑出「领红包」），
      * 因此对短词要求更高的置信度；长词本身信息量足，门槛可放宽。
      */
-    minBannedWordConfidence(keywordLength: any): 1 | 0.6 | 0.65 | 0.55 | 0.45;
+    minBannedWordConfidence(keywordLength: any): 1 | 0.55 | 0.6 | 0.65 | 0.45;
     subsequenceMatch(text: any, keyword: any): {
         start: any;
         end: any;

@@ -1,0 +1,814 @@
+/**
+ * AI 回复引擎。
+ *
+ * 一次「收到消息」的完整流程：
+ *   record()  记录到上下文（所有消息都记，包括被管控/指令之外的人话）
+ *   handle()  判定是否接话 → 组装提示词 → （可选）解析图片 → 调模型
+ *             → 输出正文 / <pass/> → 发送 → 把自己的回复写回上下文
+ *
+ * 关键取舍：
+ * - 决策与生成合并为一次模型调用，避免"兴趣判定答非所问、生成又挑另一条"；
+ * - 只回应当前消息，引用与回答永远一致；
+ * - 允许模型用 <pass/> 主动放弃，放弃也重置计数，避免每条消息都空转调用。
+ */
+
+import { AiState, GroupState, ChatRecord, FollowupState } from './state';
+import { decideTrigger } from './trigger';
+import { buildJudgePrompt, buildReplyPrompt, buildUserPrompt, PASS_TOKEN } from './prompt';
+import { ChatProvider, ChatResult } from './provider';
+import { pickImages, resolveImages } from './vision';
+import { selectMemoryBlocks, splitMemoryBlocks, tokenizeForMatch } from './memory';
+import { NameResolver, MemberIdentity } from '../core/names';
+import { renderMessage, RenderedImage, truncate } from '../core/text';
+import { AiHookRegistry, AiHookContext } from './hooks';
+import {
+  buildSearchQuery,
+  fetchWebSearch,
+  shouldWebSearch,
+  WebSearchMode,
+} from './websearch';
+
+export interface AiHost {
+  config: any;
+  logger: any;
+  getOneBotApi(session: any): any;
+  toGroupId(session: any): number | null;
+  extractImages(session: any): RenderedImage[];
+  fetchQuotedImages?(session: any, quote: any): Promise<RenderedImage[]>;
+  resolveImage(ref: string, session: any): Promise<string>;
+  sendReply(session: any, text: string): Promise<void>;
+  readMemoryFile(scope?: { kind: 'group' | 'private'; id: string } | null): Promise<string>;
+}
+
+export interface AiDeps {
+  provider?: ChatProvider;
+  state?: AiState;
+  rng?: () => number;
+  now?: () => number;
+  fetchImpl?: typeof fetch;
+}
+
+const PASS_RE = /^\s*<(?:pass\s*\/?|不回复)>/i;
+
+function cleanReply(text: string, selfName: string): string {
+  let out = String(text || '')
+    .replace(/^\s*```[a-zA-Z0-9_-]*\s*\n?/, '')
+    .replace(/\n?\s*```\s*$/, '')
+    // 防止模型输出被平台解析成图片/CQ 码（h.text 本身不解析，这里只是保持干净）
+    .replace(/\[CQ:[^\]]+\]/gi, '')
+    .replace(/<img\b[^>]*>/gi, '')
+    .trim();
+  // 去掉模型自作主张的「自称：」前缀
+  const prefix = new RegExp(`^\\s*${selfName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[:：]\\s*`, 'i');
+  out = out.replace(prefix, '');
+  // 整句被引号包住时脱掉
+  if (/^[“"「].*[”"」]$/.test(out)) out = out.slice(1, -1).trim();
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+function clipReply(text: string, maxChars: number): string {
+  const max = Math.max(20, maxChars || 120);
+  if (text.length <= max) return text;
+  const slice = text.slice(0, max);
+  const boundary = Math.max(
+    slice.lastIndexOf('。'),
+    slice.lastIndexOf('！'),
+    slice.lastIndexOf('？'),
+    slice.lastIndexOf('，'),
+    slice.lastIndexOf(';'),
+    slice.lastIndexOf('；'),
+  );
+  if (boundary >= max * 0.5) return slice.slice(0, boundary + 1);
+  return `${slice}…`;
+}
+
+export class AiEngine {
+  readonly state: AiState;
+  /** 外部插件扩展点：提示词风格段 + 输出过滤 */
+  readonly hooks: AiHookRegistry;
+  private provider: ChatProvider;
+  private names: NameResolver;
+  private rng: () => number;
+  private now: () => number;
+  private fetchImpl: typeof fetch;
+  private host: AiHost;
+  private config: any;
+  private searchCache = new Map<string, { at: number; section: string }>();
+  private searchRate = new Map<string, number[]>();
+  private searchUnsupportedUntil = 0;
+
+  constructor(host: AiHost, deps: AiDeps = {}) {
+    this.host = host;
+    this.config = host.config;
+    this.state = deps.state ?? new AiState();
+    this.hooks = new AiHookRegistry(host.logger);
+    this.provider = deps.provider ?? new ChatProvider(host.config, host.logger);
+    this.names = new NameResolver({
+      getOneBotApi: (session) => host.getOneBotApi(session),
+      toGroupId: (session) => host.toGroupId(session),
+      logger: host.logger,
+    });
+    this.rng = deps.rng ?? Math.random;
+    this.now = deps.now ?? Date.now;
+    this.fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  }
+
+  // ---------------------------------------------------------------- 配置
+
+  private groupKey(session: any): string {
+    if (!session?.guildId) return '';
+    return `${session.platform ?? 'unknown'}:${session.guildId}`;
+  }
+
+  private ruleFor(session: any): any {
+    const guildId = String(session?.guildId ?? '');
+    const rules: any[] = Array.isArray(this.config.groupRules) ? this.config.groupRules : [];
+    return rules.find((item) => String(item?.guildId ?? '').trim() === guildId);
+  }
+
+  resolveEnabled(session: any): boolean {
+    const rule = this.ruleFor(session);
+    const requireRule = this.config.aiReplyRequireGroupRule !== false;
+    if (requireRule && !rule) return false;
+    if (rule && typeof rule.enableAiReply === 'boolean') return rule.enableAiReply;
+    return !!this.config.enableAiReply;
+  }
+
+  private get contextWindow(): number {
+    const value = Number(this.config.aiContextWindow ?? 24);
+    return Math.max(6, Math.min(100, Number.isFinite(value) ? value : 24));
+  }
+
+  private get selfName(): string {
+    const persona = this.activePersona();
+    return String(persona?.selfName || this.config.aiAgentName || 'bot').trim() || 'bot';
+  }
+
+  private activePersona(): any {
+    const id = String(this.config.aiActivePersona ?? '').trim();
+    if (!id) return null;
+    const list: any[] = Array.isArray(this.config.aiPersonas) ? this.config.aiPersonas : [];
+    return list.find((item) => String(item?.id ?? '').trim() === id) ?? null;
+  }
+
+  private get personaPrompt(): string {
+    const persona = this.activePersona();
+    return String(persona?.prompt || this.config.aiSystemPrompt || '').trim();
+  }
+
+  private get maxReplyChars(): number {
+    const value = Number(this.config.aiMaxReplyChars ?? 120);
+    return Math.max(20, Math.min(500, Number.isFinite(value) ? value : 120));
+  }
+
+  private get debugPrompt(): boolean {
+    return !!this.config.aiDebugPrompt;
+  }
+
+  // ---------------------------------------------------------------- 记录
+
+  /** 是否像指令（这类消息不进上下文，避免污染） */
+  private isCommandLike(text: string): boolean {
+    const value = String(text || '').trim();
+    if (!value) return false;
+    if (/^[/.!！#＃]/.test(value)) return true;
+    if (/^\[[^\]\s]+\]/.test(value)) return true;
+    const prefixes = [this.config.command, this.config.menuCommand, 'help']
+      .map((item: any) => String(item ?? '').trim())
+      .filter(Boolean);
+    return prefixes.some((prefix: string) => value === prefix || value.startsWith(`${prefix} `));
+  }
+
+  /** 记录一条群消息；返回落库后的记录（指令类返回 null） */
+  async record(session: any): Promise<ChatRecord | null> {
+    const key = this.groupKey(session);
+    if (!key || !session?.userId) return null;
+    if (String(session.userId) === String(session.bot?.selfId ?? '')) return null;
+
+    const state = this.state.get(key);
+    const messageId = String(session.messageId ?? '');
+    if (messageId) {
+      const existing = state.records.find((item) => item.id === messageId);
+      if (existing) return existing;
+    }
+
+    const contextWindow = this.contextWindow;
+
+    // 先排除指令，避免为指令解析 @ / 查群名片
+    const rawText = String(session.content ?? '').trim();
+    if (this.isCommandLike(rawText.replace(/^\s*(<at\b[^>]*\/?>|\[CQ:at,[^\]]+\])\s*/i, ''))) {
+      return null;
+    }
+
+    const identity: MemberIdentity = await this.names.identify(session);
+
+    const rendered = await renderMessage(session, this.names.resolverFor(session), {
+      selfId: String(session.bot?.selfId ?? session.selfId ?? ''),
+    });
+
+    const record: ChatRecord = {
+      id: messageId || `local-${this.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      userId: String(session.userId),
+      name: identity.name || String(session.userId),
+      role: identity.role,
+      text: rendered.text,
+      images: rendered.images,
+      quote: rendered.quote,
+      forwardText: await this.readForwards(session, rendered.forwards || []),
+      mentions: rendered.mentions,
+      atBot: rendered.atBot,
+      self: false,
+      at: Number(session.timestamp) || this.now(),
+    };
+
+    state.push(record, contextWindow);
+    state.counter += 1;
+    return record;
+  }
+
+  /** 追加一条系统注记（复读等），不进计数、不触发 */
+  note(text: string, groupKey?: string, session?: any): void {
+    const key = groupKey || (session ? this.groupKey(session) : '');
+    if (!key || !text?.trim()) return;
+    const state = this.state.get(key);
+    state.push(
+      {
+        id: `note-${this.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        userId: 'system',
+        name: '系统',
+        role: 'unknown',
+        text: String(text).trim(),
+        images: [],
+        mentions: [],
+        atBot: false,
+        self: false,
+        at: this.now(),
+        command: true,
+      },
+      this.contextWindow,
+    );
+  }
+
+  /** 机器人自己发出的消息：写回上下文，解决"说完就忘" */
+  recordSelf(session: any, text: string): void {
+    const key = this.groupKey(session);
+    if (!key || !text?.trim()) return;
+    const state = this.state.get(key);
+    state.push(
+      {
+        id: `self-${this.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        userId: String(session.bot?.selfId ?? ''),
+        name: this.selfName,
+        role: 'unknown',
+        text: String(text).trim(),
+        images: [],
+        mentions: [],
+        atBot: false,
+        self: true,
+        at: this.now(),
+      },
+      this.contextWindow,
+    );
+  }
+
+  // ---------------------------------------------------------------- 点名 / 跟随
+
+  private isMention(session: any, record: ChatRecord): boolean {
+    // 渲染阶段已经确认 @ 了 bot，不依赖 session.content 的序列化格式
+    if (record.atBot) return true;
+    const selfId = String(session?.bot?.selfId ?? session?.selfId ?? '');
+    if (selfId) {
+      const content = String(session?.content ?? '');
+      if (content.includes(`<at id="${selfId}"`)) return true;
+      const escaped = selfId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`\\[CQ:at,[^\\]]*(?:qq|id)=${escaped}(?:,|\\])`, 'i').test(content)) return true;
+    }
+    // 只叫名字（不带 @）是否算点名，交给 aiEnableDirectMentionTrigger 控制
+    if (this.config.aiEnableDirectMentionTrigger === false) return false;
+    const name = this.selfName.toLowerCase();
+    if (!name) return false;
+    return String(record.text || '').toLowerCase().includes(name);
+  }
+
+  private addressesOthers(record: ChatRecord, session: any): boolean {
+    const selfId = String(session?.bot?.selfId ?? '');
+    return record.mentions.length > 0 && !record.mentions.includes(selfId);
+  }
+
+  private shouldContinueFollowup(record: ChatRecord, followup: FollowupState): boolean {
+    const text = String(record.text || '').trim();
+    if (!text) return false;
+    if (this.isCommandLike(text)) return false;
+    if (/^[/.!！#＃]/.test(text)) return false;
+    if (text.length <= 2) return false;
+    if (/^[\u{1F300}-\u{1FAFF}\s~～!！.。]+$/u.test(text)) return false;
+    if (/(换个话题|换个问题|另外|题外话|不聊这个|先不说这个|说点别的|再问个新的)/.test(text)) return false;
+
+    const current = tokenizeForMatch(text);
+    const overlap = [...current].filter((token) => followup.anchorTokens.includes(token)).length;
+    const ratio = overlap / Math.max(1, Math.min(current.size || 1, followup.anchorTokens.length || 1));
+    if (text.length >= 8 && overlap === 0 && !/[?？]/.test(text)) return false;
+    if (text.length >= 8 && ratio <= 0.12 && /[?？]/.test(text)) return false;
+
+    if (/[?？]/.test(text)) return true;
+    if (/(继续|然后|那|所以|为什么|怎么|如何|帮我|还能|可以吗|行吗|对不对|是不是|展开|多说|细说|具体|举个例子|还有呢|后来呢|说说|讲讲)/.test(text)) return true;
+    // 没有话题交集、也不是明确的追问 → 不追着说，避免用户换话题后机器人自说自话
+    if (overlap > 0 && ratio >= 0.18) return true;
+    return false;
+  }
+
+  private startFollowup(state: GroupState, record: ChatRecord): void {
+    if (this.config.aiEnableFollowupAfterMention === false) return;
+    const seconds = Math.max(1, Number(this.config.aiFollowupWindowSeconds ?? 120));
+    state.followup = {
+      userId: record.userId,
+      expiresAt: this.now() + seconds * 1000,
+      turns: 0,
+      anchorTokens: [...tokenizeForMatch(record.text)],
+      lastText: record.text,
+    };
+  }
+
+  private bumpFollowup(state: GroupState, record: ChatRecord): void {
+    const followup = state.followup;
+    if (!followup) return;
+    followup.turns += 1;
+    followup.lastText = record.text;
+    const seconds = Math.max(1, Number(this.config.aiFollowupWindowSeconds ?? 120));
+    followup.expiresAt = this.now() + seconds * 1000;
+    const maxTurns = Math.max(1, Number(this.config.aiFollowupMaxTurns ?? 3));
+    if (followup.turns >= maxTurns) state.followup = null;
+  }
+
+  private getFollowup(state: GroupState, record: ChatRecord, session: any): FollowupState | null {
+    const followup = state.followup;
+    if (!followup) return null;
+    if (this.now() > followup.expiresAt) {
+      state.followup = null;
+      return null;
+    }
+    if (followup.userId !== record.userId) return null;
+    if (this.addressesOthers(record, session)) {
+      state.followup = null;
+      return null;
+    }
+    return followup;
+  }
+
+  // ---------------------------------------------------------------- 记忆
+
+  private async loadMemories(record: ChatRecord, state: GroupState, session?: any): Promise<string[]> {
+    if (!this.config.enableMemory || this.config.memoryInAi === false) return [];
+    let content = '';
+    try {
+      // 按作用域读对应文件：群聊读该群，私聊读该用户
+      const scope = typeof (this.host as any).memoryScopeOf === 'function'
+        ? (this.host as any).memoryScopeOf(session)
+        : null;
+      content = await this.host.readMemoryFile(scope);
+    } catch {
+      return [];
+    }
+    const blocks = splitMemoryBlocks(content);
+    if (!blocks.length) return [];
+    const recent = state.records.slice(-3).map((item) => item.text);
+    const selected = selectMemoryBlocks(blocks, [record.text, ...recent], {
+      limit: 3,
+      minScore: 0.12,
+      maxChars: 160,
+    });
+    return selected.map((item) => item.text);
+  }
+
+  // ---------------------------------------------------------------- 主流程
+
+  async handle(session: any): Promise<void> {
+    const key = this.groupKey(session);
+    if (!key) return;
+    if (!this.resolveEnabled(session)) return;
+    if (String(session.userId) === String(session.bot?.selfId ?? '')) return;
+    if (session.platform && !this.platformAllowed(session.platform)) return;
+
+    const state = this.state.get(key);
+    const messageId = String(session.messageId ?? '');
+    if (messageId && state.isDuplicate(`${session.platform}:${session.guildId}:${session.userId}:${messageId}`, this.now())) {
+      return;
+    }
+
+    let record = messageId ? state.records.find((item) => item.id === messageId) : undefined;
+    if (!record) record = (await this.record(session)) ?? undefined;
+    if (!record) return;
+
+    const mention = this.isMention(session, record);
+    const followupState = mention ? null : this.getFollowup(state, record, session);
+    const followup = !!followupState && this.shouldContinueFollowup(record, followupState);
+    // 用户换了话题/说的和上一轮无关时，丢掉待续话题，避免机器人追着自己上一句说
+    if (followupState && !followup) state.followup = null;
+
+    const threshold = Math.max(1, Number(this.config.aiMessageThreshold ?? 15));
+    const decision = decideTrigger({
+      mode: (this.config.aiReplyMode || 'hybrid') as any,
+      counter: state.counter,
+      threshold,
+      probability: Number(this.config.aiRandomReplyProbability ?? 0.08),
+      now: this.now(),
+      lastAttemptAt: state.lastAttemptAt,
+      minIntervalMs: Math.max(0, Number(this.config.aiMinReplyIntervalSeconds ?? 45)) * 1000,
+      lastReplyAt: state.lastReplyAt || 0,
+      mentionCooldownMs: Math.max(0, Number(this.config.aiMentionCooldownSeconds ?? 5)) * 1000,
+      inFlight: state.inFlight,
+      mention,
+      followup,
+      rng: this.rng,
+    });
+
+    this.log('ai-trigger', {
+      fire: decision.fire,
+      reason: decision.reason,
+      counter: state.counter,
+      threshold,
+      mention,
+      followup,
+      ctx: state.records.length,
+    }, session);
+    if (!decision.fire) return;
+
+    state.inFlight = true;
+    state.lastAttemptAt = this.now();
+    const startedAt = this.now();
+
+    try {
+      const allowPass = !mention && !followup;
+      const memories = await this.loadMemories(record, state, session);
+      const hookCtx: AiHookContext = {
+        session,
+        groupId: String(session.guildId),
+        mode: 'reply',
+      };
+      const styleSections = await this.hooks.collectSections(hookCtx);
+      const webSearch = await this.webSearch(record, session);
+      const promptInput = {
+        selfName: this.selfName,
+        persona: this.personaPrompt,
+        groupId: String(session.guildId),
+        records: state.records,
+        current: record,
+        mention,
+        followup,
+        allowPass,
+        memories,
+        maxReplyChars: this.maxReplyChars,
+        styleSections,
+        webSearch,
+        webSearchEnabled: this.config.aiWebSearchEnabled !== false,
+      };
+
+      if (allowPass && this.config.aiReplyDecision === 'two-stage') {
+        const judge = await this.judge(promptInput);
+        if (!judge) {
+          state.counter = 0;
+          this.log('ai-pass', { by: 'judge', latencyMs: this.now() - startedAt }, session);
+          return;
+        }
+      }
+
+      const prompt = buildReplyPrompt(promptInput);
+      if (this.debugPrompt) {
+        this.host.logger.info(`[ai-debug] system=${prompt.system}\n[ai-debug] user=${prompt.user}`);
+      }
+
+      const images = await this.collectImages(session, record, state);
+      const result = await this.provider.chat({
+        system: prompt.system,
+        user: prompt.user,
+        images,
+        temperature: Number(this.config.aiTemperature ?? 0.8),
+        maxTokens: Number(this.config.aiMaxOutputTokens ?? 400),
+      });
+
+      if (!result.ok) {
+        this.log('ai-reply', {
+          ok: false,
+          error: result.error,
+          trigger: decision.reason,
+          latencyMs: this.now() - startedAt,
+        }, session);
+        return;
+      }
+
+      const raw = String(result.text || '').trim();
+      if (!raw || PASS_RE.test(raw)) {
+        state.counter = 0;
+        this.log('ai-pass', {
+          by: 'model',
+          trigger: decision.reason,
+          latencyMs: this.now() - startedAt,
+        }, session);
+        return;
+      }
+
+      let finalRaw = raw;
+      if (!webSearch && this.shouldReviseWithSearch(raw)) {
+        const revisedSearch = await this.webSearch(record, session, true);
+        if (revisedSearch) {
+          const revisedInput = { ...promptInput, webSearch: revisedSearch };
+          const revisedUser = `${buildUserPrompt(revisedInput)}\n\n你刚才的回答是：「${truncate(finalRaw, 120)}」。现在补上了联网搜索结果，请根据结果重写最终回复；不要提“刚才/搜索/系统”，直接给答案。`;
+          const revised = await this.provider.chat({
+            system: prompt.system,
+            user: revisedUser,
+            images,
+            temperature: Number(this.config.aiTemperature ?? 0.8),
+            maxTokens: Number(this.config.aiMaxOutputTokens ?? 400),
+          });
+          if (revised.ok && revised.text && !PASS_RE.test(revised.text.trim())) {
+            finalRaw = revised.text.trim();
+            this.log('web-search', { ok: true, revised: true, query: buildSearchQuery(record.text) }, session);
+          }
+        }
+      }
+
+      const cleaned = cleanReply(finalRaw, this.selfName);      if (!cleaned) {
+        state.counter = 0;
+        return;
+      }
+
+      const filtered = await this.hooks.applyFilters(cleaned, hookCtx);
+      if (filtered == null) {
+        state.counter = 0;
+        this.log('ai-pass', {
+          by: 'filter',
+          trigger: decision.reason,
+          latencyMs: this.now() - startedAt,
+        }, session);
+        return;
+      }
+
+      const finalText = clipReply(filtered, this.maxReplyChars);
+      if (!finalText) {
+        state.counter = 0;
+        return;
+      }
+
+      await this.host.sendReply(session, finalText);
+      state.lastReplyAt = this.now();
+      state.counter = 0;
+      this.recordSelf(session, finalText);
+
+      if (mention) this.startFollowup(state, record);
+      else if (followup && state.followup) this.bumpFollowup(state, record);
+
+      this.log('ai-reply', {
+        ok: true,
+        trigger: decision.reason,
+        latencyMs: this.now() - startedAt,
+        images: images.length,
+        degradedToText: !!result.degradedToText,
+        chars: finalText.length,
+        preview: finalText.slice(0, 60),
+      }, session);
+
+      await this.hooks.runAfterReply({ ...hookCtx, text: finalText });
+    } catch (error: any) {
+      this.log('ai-reply', {
+        ok: false,
+        error: String(error?.message || error),
+        trigger: decision.reason,
+      }, session);
+    } finally {
+      state.inFlight = false;
+    }
+  }
+
+  /** 供外部插件（如私聊插件）复用同一个模型 provider。 */
+  chat(request: any) {
+    return this.provider.chat(request);
+  }
+
+  /** 群内长时间没人说话时，生成一条主动话题。 */
+  async idleTopic(groupId: string): Promise<string> {
+    const session = { guildId: groupId, isDirect: false, platform: 'onebot' };
+    let sections: string[] = [];
+    try {
+      sections = await this.hooks.collectSections({ session, groupId, mode: 'reply' });
+    } catch { /* ignore */ }
+    const system = [
+      `你是 QQ 群 ${groupId} 里的一个普通成员。`,
+      '群里已经很久没人说话了。主动抛一个轻松、具体、能接话的话题，一句话。',
+      '不要问“在吗”，不要提“很久没人说话”，不要自我介绍。',
+      ...sections,
+    ].join('\n');
+    const result = await this.provider.chat({
+      system,
+      user: '现在发一条主动话题。',
+      temperature: Number(this.config.aiTemperature ?? 0.8),
+      maxTokens: Math.min(300, Number(this.config.aiMaxOutputTokens ?? 400)),
+    });
+    if (!result.ok || !result.text) return '';
+    const raw = String(result.text).trim();
+    if (!raw || PASS_RE.test(raw)) return '';
+    return clipReply(cleanReply(raw, this.selfName), this.maxReplyChars)
+      .replace(/\[表情[:：][^\]]*\]/g, '')
+      .trim();
+  }
+
+  /** 需要时调用 DeepSeek Search API；失败/不支持/没结果都返回空串，继续普通回复。 */
+  private async webSearch(record: ChatRecord, session: any, force = false): Promise<string> {
+    if (this.config.aiWebSearchEnabled === false) return '';
+    const mode = (this.config.aiWebSearchMode || 'auto') as WebSearchMode;
+    if (mode === 'off') return '';
+    const text = String(record.text || '');
+    if (!force && !shouldWebSearch(text, mode)) return '';
+    const query = buildSearchQuery(text);
+    if (!query) return '';
+
+    const now = this.now();
+    if (this.searchUnsupportedUntil > now) return '';
+    const groupId = String(session?.guildId || '');
+    const maxPerHour = Math.max(0, Number(this.config.aiWebSearchMaxPerHour ?? 10));
+    if (maxPerHour > 0) {
+      const list = (this.searchRate.get(groupId) || []).filter((t) => now - t < 3600_000);
+      if (list.length >= maxPerHour) {
+        this.log('web-search', { ok: false, reason: 'rate-limit', groupId }, session);
+        return '';
+      }
+      list.push(now);
+      this.searchRate.set(groupId, list);
+    }
+
+    const cacheMinutes = Math.max(0, Number(this.config.aiWebSearchCacheMinutes ?? 10));
+    const cacheKey = `${String(this.config.aiBaseUrl || '')}|${query}`;
+    if (cacheMinutes > 0) {
+      const hit = this.searchCache.get(cacheKey);
+      if (hit && now - hit.at < cacheMinutes * 60_000) return hit.section;
+    }
+
+    const startedAt = this.now();
+    const outcome = await fetchWebSearch({
+      query,
+      apiKey: String(this.config.aiApiKey || ''),
+      baseUrl: String(this.config.aiBaseUrl || 'https://api.deepseek.com'),
+      maxResults: Number(this.config.aiWebSearchMaxResults ?? 5),
+      timeoutMs: Number(this.config.aiWebSearchTimeoutMs ?? 4000),
+      maxChars: 1800,
+    }, this.fetchImpl);
+
+    if (!outcome.ok) {
+      // 400/401/403/404 通常意味着这个 API 不支持 Search；10 分钟内不再重试
+      if (/^http-(400|401|403|404)$/.test(outcome.reason || '')) {
+        this.searchUnsupportedUntil = now + 10 * 60_000;
+      }
+      this.log('web-search', {
+        ok: false,
+        reason: outcome.reason,
+        query,
+        latencyMs: this.now() - startedAt,
+      }, session);
+      return '';
+    }
+
+    if (cacheMinutes > 0) {
+      this.searchCache.set(cacheKey, { at: now, section: outcome.section || '' });
+      if (this.searchCache.size > 100) {
+        const oldest = this.searchCache.keys().next().value;
+        if (oldest) this.searchCache.delete(oldest);
+      }
+    }
+    this.log('web-search', {
+      ok: true,
+      results: outcome.results?.length || 0,
+      query,
+      latencyMs: this.now() - startedAt,
+    }, session);
+    return outcome.section || '';
+  }
+
+  /** 模型自己都说不知道/搜不了时，补一次搜索再重写；只在不认识的问题上多一次调用。 */
+  private shouldReviseWithSearch(raw: string): boolean {
+    if (this.config.aiWebSearchEnabled === false) return false;
+    if (String(this.config.aiWebSearchMode || 'auto') === 'off') return false;
+    return /(不知道|记不清|记不准|记不牢|不敢乱说|说岔|没法上网|查不了|搜不了|没有联网|无法联网|不确定|不太清楚|分不清|瞎猜)/.test(raw);
+  }
+
+  /** 读取合并转发的子消息，压成一行行文本；读不到就返回空串。 */
+  private async readForwards(session: any, forwards: any[]): Promise<string> {
+    if (this.config.aiReadForwardMessage === false) return '';
+    if (!Array.isArray(forwards) || !forwards.length) return '';
+    const limit = Math.max(1, Math.min(50, Number(this.config.aiForwardMaxNodes ?? 20)));
+    const onebot = this.host.getOneBotApi(session);
+    if (!onebot?.getForwardMsg) return '';
+    const blocks: string[] = [];
+    for (const item of forwards.slice(0, 3)) {
+      const id = String(item?.id || '').trim();
+      if (!id) continue;
+      try {
+        const data = await onebot.getForwardMsg(id);
+        const messages = Array.isArray(data?.messages) ? data.messages
+          : (Array.isArray(data?.message) ? data.message : (Array.isArray(data) ? data : []));
+        for (const node of messages.slice(0, limit)) {
+          const sender = String(node?.sender?.card || node?.sender?.nickname || node?.nickname || node?.name || '').trim();
+          const content = Array.isArray(node?.message)
+            ? node.message.filter((seg: any) => seg?.type === 'text').map((seg: any) => String(seg?.data?.text ?? '')).join('')
+            : String(node?.content ?? node?.raw_message ?? node?.message ?? '');
+          const text = content.replace(/\[CQ:[^\]]+\]/g, '[图片]').replace(/\s+/g, ' ').trim();
+          if (!text) continue;
+          blocks.push(`${sender ? `${sender}: ` : ''}${truncate(text, 160)}`);
+        }
+      } catch (error) {
+        this.log('forward', { ok: false, error: String(error) }, session);
+      }
+    }
+    if (!blocks.length) return '';
+    this.log('forward', { ok: true, nodes: blocks.length }, session);
+    return blocks.join('\n');
+  }
+
+  private recentImageRecords(state: GroupState, record: ChatRecord, maxAgeMs = 120000): RenderedImage[] {
+    const cutoff = Number(record.at) - maxAgeMs;
+    const candidates = state.records
+      .filter((item) => (
+        !item.self
+        && item.id !== record.id
+        && item.userId === record.userId
+        && item.images.length > 0
+        && Number(item.at) >= cutoff
+      ))
+      .slice(-4)
+      .reverse();
+    const out: RenderedImage[] = [];
+    for (const item of candidates) {
+      for (const image of item.images) out.push(image);
+    }
+    return out;
+  }
+
+  private async collectImages(session: any, record: ChatRecord, state: GroupState): Promise<string[]> {
+    if (this.config.aiEnableImageRecognition === false) return [];
+    const maxCount = Math.max(0, Number(this.config.aiImageMaxCount ?? 2));
+    if (!maxCount) return [];
+
+    const own = record.images.length ? record.images : this.host.extractImages(session);
+    // 用户常见的“先发图，再单独 @ 一句”：当前消息没有图，回看同一用户最近 2 分钟内的图
+    const fallback = own.length ? [] : this.recentImageRecords(state, record);
+    let quoted: RenderedImage[] = record.quote
+      ? (record.quote.images?.length ? record.quote.images : this.host.extractImages(session?.quote))
+      : [];
+    // 引用消息里没解析到图（常见于 quote 只带 messageId）：用 get_msg 回查一次
+    if (!quoted.length && record.quote?.id && typeof this.host.fetchQuotedImages === 'function') {
+      quoted = await this.host.fetchQuotedImages(session, record.quote);
+    }
+    const items = pickImages([...own, ...fallback], quoted, maxCount);
+    if (!items.length) return [];
+
+    return resolveImages(
+      items,
+      (ref) => this.host.resolveImage(ref, session),
+      { maxCount, budgetMs: Number(this.config.aiImageBudgetMs ?? 6000) },
+    );
+  }
+
+  private async judge(input: any): Promise<boolean> {
+    const prompt = buildJudgePrompt(input);
+    const result: ChatResult = await this.provider.chat({
+      system: prompt.system,
+      user: prompt.user,
+      temperature: 0.1,
+      maxTokens: 256,
+    });
+    if (!result.ok || !result.text) return false;
+    const match = result.text.match(/\{[\s\S]*\}/);
+    if (!match) return false;
+    try {
+      const parsed = JSON.parse(match[0]);
+      const score = Number(parsed?.score) || 0;
+      const min = Number(this.config.aiInterestMinScore ?? 60);
+      return !!parsed?.reply && score >= min;
+    } catch {
+      return false;
+    }
+  }
+
+  private platformAllowed(platform: string): boolean {
+    const list = Array.isArray(this.config.platformFilter) ? this.config.platformFilter : ['onebot'];
+    return list.includes(platform);
+  }
+
+  private log(event: string, data: Record<string, any>, session: any): void {
+    const extra = Object.entries(data)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => `${key}=${typeof value === 'string' ? JSON.stringify(value) : value}`)
+      .join(' ');
+    this.host.logger.info(
+      `[${event}] ${extra} | platform=${session?.platform ?? '?'} user=${session?.userId ?? '?'} guild=${session?.guildId ?? '?'}`,
+    );
+  }
+
+  /** 供指令/调试使用 */
+  displayNameFor(session: any, qq: string): Promise<string> {
+    return this.names.display(session, qq);
+  }
+
+  clear(): void {
+    this.state.clear();
+    this.names.clear();
+  }
+}

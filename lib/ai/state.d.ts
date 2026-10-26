@@ -42,8 +42,10 @@ export declare class GroupState {
     inFlight: boolean;
     followup: FollowupState | null;
     seen: Map<string, number>;
-    trim(window: number): void;
-    push(record: ChatRecord, window: number): void;
+    /** 挤压上下文，返回被挤出的消息（按时间先后）。 */
+    trim(window: number): ChatRecord[];
+    /** @returns 本次被挤出的消息，供外部做归纳 */
+    push(record: ChatRecord, window: number): ChatRecord[];
     /** 事件去重：同一 messageId 15 秒内只处理一次 */
     isDuplicate(key: string, now: number): boolean;
 }

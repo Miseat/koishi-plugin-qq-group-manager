@@ -25,7 +25,7 @@ test('服务可以实例化，AI 引擎已挂载', () => {
   assert.equal(typeof service.ai.handle, 'function');
   assert.equal(typeof service.sendReply, 'function');
   assert.ok(service.aiHooks, '应暴露 aiHooks 扩展点');
-  assert.equal(service.aiHooks.version, 1);
+  assert.equal(service.aiHooks.version, 2);
   assert.equal(typeof service.aiHooks.registerPromptSection, 'function');
   assert.equal(typeof service.aiHooks.registerOutputFilter, 'function');
   assert.ok(app.get('qqgmAiHooks'), '扩展点应挂到 root 供兄弟插件 inject');

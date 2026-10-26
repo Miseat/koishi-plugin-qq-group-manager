@@ -71,7 +71,16 @@ export declare const Config: Schema<Schemastery.ObjectS<{
 }> | Schemastery.ObjectS<{
     enableMemory: Schema<boolean, boolean>;
     memoryFileName: Schema<string, string>;
+    memoryPerScope: Schema<boolean, boolean>;
     memoryInAi: Schema<boolean, boolean>;
+    memoryAutoLearn: Schema<boolean, boolean>;
+    memoryAutoLearnGroups: Schema<string[], string[]>;
+    memoryLearnIdleHours: Schema<number, number>;
+    memoryLearnThresholdScale: Schema<number, number>;
+    memoryLearnMaxChars: Schema<number, number>;
+    memoryLearnPushBack: Schema<boolean, boolean>;
+    memoryLearnDuplicateThreshold: Schema<number, number>;
+    memoryLearnDailyLimit: Schema<number, number>;
 }> | Schemastery.ObjectS<{
     enableBlacklist: Schema<boolean, boolean>;
     blacklistFileName: Schema<string, string>;
@@ -235,7 +244,16 @@ export declare const Config: Schema<Schemastery.ObjectS<{
 } & {
     enableMemory: boolean;
     memoryFileName: string;
+    memoryPerScope: boolean;
     memoryInAi: boolean;
+    memoryAutoLearn: boolean;
+    memoryAutoLearnGroups: string[];
+    memoryLearnIdleHours: number;
+    memoryLearnThresholdScale: number;
+    memoryLearnMaxChars: number;
+    memoryLearnPushBack: boolean;
+    memoryLearnDuplicateThreshold: number;
+    memoryLearnDailyLimit: number;
 } & {
     enableBlacklist: boolean;
     blacklistFileName: string;

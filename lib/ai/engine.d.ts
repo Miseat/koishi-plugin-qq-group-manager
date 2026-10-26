@@ -24,7 +24,10 @@ export interface AiHost {
     fetchQuotedImages?(session: any, quote: any): Promise<RenderedImage[]>;
     resolveImage(ref: string, session: any): Promise<string>;
     sendReply(session: any, text: string): Promise<void>;
-    readMemoryFile(): Promise<string>;
+    readMemoryFile(scope?: {
+        kind: 'group' | 'private';
+        id: string;
+    } | null): Promise<string>;
 }
 export interface AiDeps {
     provider?: ChatProvider;
@@ -47,6 +50,12 @@ export declare class AiEngine {
     private searchCache;
     private searchRate;
     private searchUnsupportedUntil;
+    /** 自动归纳：按作用域累计被挤出的消息 */
+    private learnStore;
+    /** 自动归纳：每个作用域每天的次数，防刷额度 */
+    private learnDaily;
+    /** 自动归纳：空闲兜底定时器 */
+    private learnTimer;
     constructor(host: AiHost, deps?: AiDeps);
     private groupKey;
     private ruleFor;
@@ -65,6 +74,26 @@ export declare class AiEngine {
     note(text: string, groupKey?: string, session?: any): void;
     /** 机器人自己发出的消息：写回上下文，解决"说完就忘" */
     recordSelf(session: any, text: string): void;
+    /**
+     * 把本次被挤出上下文的消息交给外部插件（用于自动归纳沉淀）。
+     * 失败不影响主流程。
+     */
+    /**
+     * 上下文挤出后的两件事：
+     *   1. 交给外部插件（registerContextEvicted，可选）
+     *   2. 内建自动归纳：累计到阈值或空闲后总结成一条记忆写回
+     * 任何一步失败都不影响正常聊天。
+     */
+    private emitEvicted;
+    /** 归纳并（可选）回推到原会话 */
+    /** 启动空闲兜底定时器；每 5 分钟检查一次 */
+    private startLearnTimer;
+    /** 资源清理：停止定时器、清空缓存 */
+    dispose(): void;
+    private learnAndReport;
+    /** 把一批消息归纳成一条记忆并写入对应作用域；返回归纳文本或空 */
+    private summarizeRecords;
+    private findBot;
     private isMention;
     private addressesOthers;
     private shouldContinueFollowup;

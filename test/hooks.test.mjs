@@ -49,8 +49,8 @@ test('过滤器抛错时保留当前文本并继续', async () => {
   assert.equal(await hooks.applyFilters('x', ctx), 'x~');
 });
 
-test('接口版本为 1', () => {
-  assert.equal(new AiHookRegistry().version, 1);
+test('接口版本为 2', () => {
+  assert.equal(new AiHookRegistry().version, 2);
 });
 
 test('afterReply 按注册顺序执行，异常隔离', async () => {

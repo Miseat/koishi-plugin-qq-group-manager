@@ -28,7 +28,7 @@ Koishi 控制台「探索器 Explorer」里查看和手改。
 | **自动处罚** | 统计窗口内累计违规达到阈值后自动禁言 / 自动踢人，阈值、时长、窗口均可配 |
 | **黑名单** | 按群独立存储（`banMember_<群号>.md`）；入群自动比对并踢出，可选踢人时自动记录 |
 | **入群审核** | 新申请推送到群内，管理员用 `approve` / `reject` 放行或拒绝；待审单落盘，**重启不丢** |
-| **记忆库** | `[memory]` 保存 / 列出 / 查询 / 删除，落盘 `Memory.md`；开启后 AI 回复会检索并引用相关记忆 |
+| **记忆库** | `[memory]` 保存 / 列出 / 查询 / 删除，**按私聊/群聊分文件**落盘；开启后 AI 回复会检索并引用当前会话的记忆 |
 | **AI 群聊回复** | 三道闸门（阈值 / 概率 / 冷却）+ 模型自行 `<pass/>` 决定是否接话；群名片、引用、@ 目标、自己历史发言都进上下文；记忆按相关度注入；图片并发解析并限时。多人格、点名后话题跟随、温度与输出上限 |
 | **AI 识图** | 图片下载转 data URL 后送入模型，兼容 CQ 码 / HTML `<img>` / 元素三种形态与表情包 |
 | **AI 联网搜索** | 按问题自动判断是否联网，调用 DeepSeek 原生 Search API（复用现有 API Key），结果注入提示词；API 不支持 / 超时 / 无结果时自动回退普通回复 |
@@ -92,7 +92,15 @@ npm i @nestim/koishi-plugin-qq-group-manager
 | `bannedWordScoreThreshold` | `70` | 违禁词评分触发阈值（强关键词共用） |
 | `strongKeywords` | `[]` | 强关键词；命中即触发且**无视白名单豁免**，支持 `关键词\|分值` |
 | `groupRules` | `[]` | 按群覆盖策略（违禁词、强关键词、白名单关键词、AI 开关、自动处罚阈值等） |
-| `memoryFileName` | `Memory.md` | 记忆库文件名（存放在 Koishi 数据目录） |
+| `memoryFileName` | `Memory.md` | 记忆库基础文件名；分作用域时作为前缀 |
+| `memoryPerScope` | `true` | 按私聊/群聊分开存：`Memory_<群号>_群聊.md` / `Memory_<QQ号>_私聊.md` |
+| `memoryAutoLearn` | `false` | **AI 自动归纳记忆**（内建）：上下文挤满后把消息总结成记忆并回推 |
+| `memoryLearnIdleHours` | `8` | 空闲兜底小时数；期间没有新消息则不触发 |
+| `memoryLearnThresholdScale` | `1` | 归纳阈值 = `aiContextWindow × 该值` |
+| `memoryLearnMaxChars` | `150` | 单条自动记忆字数上限 |
+| `memoryLearnPushBack` | `true` | 归纳后回推原会话（私聊发私聊、群聊发对应群） |
+| `memoryLearnDuplicateThreshold` | `0.55` | 相似度超此值跳过，避免重复记 |
+| `memoryLearnDailyLimit` | `30` | 每作用域每天最多归纳次数 |
 | `blacklistFileName` | `banMember.md` | 黑名单文件名模板，实际为 `banMember_<群号>.md` |
 | `pendingJoinFileName` | `JoinRequests.md` | 待审入群申请落盘文件名 |
 | `enableJoinRequestReview` | `true` | 是否发起入群审核 |
@@ -163,6 +171,35 @@ npm i @nestim/koishi-plugin-qq-group-manager
 
   定时提醒（`[提醒] 明天 8 点 开会`）**内建在本插件里**，不需要额外安装。
 
+## 记忆自动归纳（1.4.1+，内建）
+
+不需要额外插件。开启 `memoryAutoLearn` 后：
+
+```
+上下文挤满（aiContextWindow 条）
+   ↓ 最老的消息被挤出
+累计到阈值（aiContextWindow × memoryLearnThresholdScale）
+  或空闲满 memoryLearnIdleHours（且期间有新消息）
+   ↓
+模型归纳成一条 ≤ memoryLearnMaxChars 的记忆
+   ↓ 与已有记忆去重
+写入 Memory_<群号>_群聊.md / Memory_<QQ号>_私聊.md
+   ↓ 回推原会话
+「刚记住了：……」
+```
+
+要点：
+
+- **不会空转**：8 小时里一条新消息都没有，就不归纳。
+- **不会串台**：私聊发私聊，群聊发对应群。
+- **不会记废话**：提示词只允许人物关系、稳定偏好、群内黑话、反复出现的话题；
+  寒暄、一次性情绪、已结束的接梗、纯表情全部丢弃。
+- **不会重复记**：写入前做相似度比对，超过 `memoryLearnDuplicateThreshold` 就跳过。
+- **不会刷爆额度**：每作用域每天最多 `memoryLearnDailyLimit` 次。
+- **系统备注与指令消息不参与归纳**（复读、命令结果等）。
+
+自动写入了什么，可以直接在 Koishi 控制台「探索器」打开对应的 `Memory_*.md` 查看。
+条目带的时间戳与来源标记能让你区分手动 `[memory]` 与 AI 自动归纳。
 ## 外部插件接口（1.2.2+）
 
 主插件暴露一个很小的扩展点，第三方插件可以给 AI 追加“说话风格”，或在发送前过滤输出，
@@ -199,7 +236,8 @@ export function apply(ctx) {
 
 | 文件 | 内容 |
 | --- | --- |
-| `Memory.md` | 记忆库，条目之间以 `---` 分隔 |
+| `Memory_<群号>_群聊.md` | 该群的记忆，条目之间以 `---` 分隔 |
+| `Memory_<QQ号>_私聊.md` | 与该用户的私聊记忆 |
 | `banMember_<群号>.md` | 各群黑名单，`## QQ号 · 备注` + 加入时间 |
 | `JoinRequests.md` | 待审入群申请（人类可读表格 + 机器可读区段），重启自动恢复、过期自动清理 |
 

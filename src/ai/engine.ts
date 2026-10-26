@@ -13,6 +13,7 @@
  */
 
 import { AiState, GroupState, ChatRecord, FollowupState } from './state';
+import { LearnBucket, LearnStore, buildSummaryPrompt, cleanSummary, isDuplicate } from './learn';
 import { decideTrigger } from './trigger';
 import { buildJudgePrompt, buildReplyPrompt, buildUserPrompt, PASS_TOKEN } from './prompt';
 import { ChatProvider, ChatResult } from './provider';
@@ -37,7 +38,7 @@ export interface AiHost {
   fetchQuotedImages?(session: any, quote: any): Promise<RenderedImage[]>;
   resolveImage(ref: string, session: any): Promise<string>;
   sendReply(session: any, text: string): Promise<void>;
-  readMemoryFile(): Promise<string>;
+  readMemoryFile(scope?: { kind: 'group' | 'private'; id: string } | null): Promise<string>;
 }
 
 export interface AiDeps {
@@ -96,6 +97,12 @@ export class AiEngine {
   private searchCache = new Map<string, { at: number; section: string }>();
   private searchRate = new Map<string, number[]>();
   private searchUnsupportedUntil = 0;
+  /** 自动归纳：按作用域累计被挤出的消息 */
+  private learnStore = new LearnStore();
+  /** 自动归纳：每个作用域每天的次数，防刷额度 */
+  private learnDaily = new Map<string, number>();
+  /** 自动归纳：空闲兜底定时器 */
+  private learnTimer: any = null;
 
   constructor(host: AiHost, deps: AiDeps = {}) {
     this.host = host;
@@ -111,6 +118,9 @@ export class AiEngine {
     this.rng = deps.rng ?? Math.random;
     this.now = deps.now ?? Date.now;
     this.fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+
+    // 空闲兜底：消息量迟迟不满阈值时，超时后归纳一次
+    this.startLearnTimer();
   }
 
   // ---------------------------------------------------------------- 配置
@@ -221,7 +231,8 @@ export class AiEngine {
       at: Number(session.timestamp) || this.now(),
     };
 
-    state.push(record, contextWindow);
+    const evicted = state.push(record, contextWindow);
+    this.emitEvicted(evicted, key, session);
     state.counter += 1;
     return record;
   }
@@ -231,7 +242,7 @@ export class AiEngine {
     const key = groupKey || (session ? this.groupKey(session) : '');
     if (!key || !text?.trim()) return;
     const state = this.state.get(key);
-    state.push(
+    const evicted = state.push(
       {
         id: `note-${this.now()}-${Math.random().toString(36).slice(2, 6)}`,
         userId: 'system',
@@ -247,6 +258,7 @@ export class AiEngine {
       },
       this.contextWindow,
     );
+    this.emitEvicted(evicted, groupKey, session);
   }
 
   /** 机器人自己发出的消息：写回上下文，解决"说完就忘" */
@@ -254,7 +266,7 @@ export class AiEngine {
     const key = this.groupKey(session);
     if (!key || !text?.trim()) return;
     const state = this.state.get(key);
-    state.push(
+    const evicted = state.push(
       {
         id: `self-${this.now()}-${Math.random().toString(36).slice(2, 6)}`,
         userId: String(session.bot?.selfId ?? ''),
@@ -269,6 +281,213 @@ export class AiEngine {
       },
       this.contextWindow,
     );
+    this.emitEvicted(evicted, key, session);
+  }
+
+  /**
+   * 把本次被挤出上下文的消息交给外部插件（用于自动归纳沉淀）。
+   * 失败不影响主流程。
+   */
+  /**
+   * 上下文挤出后的两件事：
+   *   1. 交给外部插件（registerContextEvicted，可选）
+   *   2. 内建自动归纳：累计到阈值或空闲后总结成一条记忆写回
+   * 任何一步失败都不影响正常聊天。
+   */
+  private emitEvicted(evicted: ChatRecord[], groupKey?: string, session?: any): void {
+    if (!evicted || !evicted.length) return;
+
+    const isDirect = session?.isDirect === true || !session?.guildId;
+    const guildId = String(session?.guildId || "");
+    const userId = String(session?.userId || "");
+    const kind: "group" | "private" = isDirect ? "private" : "group";
+    const scopeId = isDirect ? userId : guildId;
+    if (!scopeId) return;
+
+    const cfg: any = this.config || {};
+
+    // ---------- 1) 分发给外部插件 ----------
+    if (this.hooks && typeof (this.hooks as any).runContextEvicted === "function") {
+      const payload = evicted.map((item) => ({
+        id: item.id,
+        userId: item.userId,
+        name: item.name,
+        role: item.role,
+        text: item.text,
+        self: item.self,
+        at: item.at,
+        command: item.command,
+      }));
+      void this.hooks
+        .runContextEvicted({
+          groupId: guildId,
+          kind,
+          scopeId,
+          session,
+          evicted: payload,
+          window: this.contextWindow,
+        })
+        .catch((error: any) => {
+          this.host.logger?.warn?.(`[ai-evicted] 分发失败: ${String(error)}`);
+        });
+    }
+
+    // ---------- 2) 内建自动归纳 ----------
+    if (!cfg.memoryAutoLearn) return;
+    if (!cfg.enableMemory || cfg.memoryAutoLearn === false) return;
+    if (!this.resolveEnabled(session)) return;
+    const allow: string[] = Array.isArray(cfg.memoryAutoLearnGroups) ? cfg.memoryAutoLearnGroups.map(String) : [];
+    if (allow.length && !allow.includes(guildId) && !allow.includes(userId)) return;
+
+    const bucket = this.learnStore.get(kind, scopeId);
+    const threshold = Math.max(1, Math.round(this.contextWindow * (Number(cfg.memoryLearnThresholdScale) || 1)));
+    const fire = bucket.push(evicted, threshold, this.now());
+    if (fire) {
+      void this.learnAndReport(kind, scopeId, bucket, "threshold", session);
+    }
+  }
+
+  /** 归纳并（可选）回推到原会话 */
+  /** 启动空闲兜底定时器；每 5 分钟检查一次 */
+  private startLearnTimer(): void {
+    if (this.learnTimer) return;
+    const cfg: any = this.config || {};
+    if (!cfg.memoryAutoLearn) return;
+    const idleHours = Math.max(1, Number(cfg.memoryLearnIdleHours) || 8);
+    const idleMs = idleHours * 60 * 60 * 1000;
+    this.learnTimer = setInterval(() => {
+      try {
+        const pending = this.learnStore.idleList(this.now(), idleMs);
+        for (const item of pending) {
+          void this.learnAndReport(item.kind as any, item.scopeId, item.bucket, "idle");
+        }
+      } catch (error: any) {
+        this.host.logger?.warn?.(`[memory-learn] 空闲检查失败: ${String(error)}`);
+      }
+    }, 5 * 60 * 1000);
+    if (this.learnTimer.unref) this.learnTimer.unref();
+  }
+
+  /** 资源清理：停止定时器、清空缓存 */
+  dispose(): void {
+    if (this.learnTimer) {
+      clearInterval(this.learnTimer);
+      this.learnTimer = null;
+    }
+    this.learnStore.clear();
+    this.learnDaily.clear();
+    this.searchCache.clear();
+    this.searchRate.clear();
+  }
+
+  private async learnAndReport(
+    kind: "group" | "private",
+    scopeId: string,
+    bucket: LearnBucket,
+    reason: string,
+    session?: any,
+  ): Promise<void> {
+    const cfg: any = this.config || {};
+    const records = bucket.drain();
+    if (!records.length) return;
+
+    const scope = { kind, id: scopeId } as any;
+    const summary = await this.summarizeRecords(records, kind, scope, reason);
+    if (!summary) return;
+
+    if (cfg.memoryLearnPushBack === false) return;
+
+    const text = `刚记住了：${summary}`;
+    try {
+      if (kind === "private") {
+        const bot = (kind === "private" && session?.bot) || null;
+        const targetBot = bot || this.findBot();
+        if (targetBot) await targetBot.sendMessage(scopeId, text, { userId: scopeId });
+      } else {
+        const targetBot = session?.bot || this.findBot();
+        if (targetBot) await targetBot.sendMessage(scopeId, text, { guildId: scopeId, channelId: scopeId });
+      }
+    } catch (error: any) {
+      this.host.logger?.warn?.(`[memory-learn] 回推失败 ${kind}:${scopeId}: ${String(error)}`);
+    }
+  }
+
+  /** 把一批消息归纳成一条记忆并写入对应作用域；返回归纳文本或空 */
+  private async summarizeRecords(
+    records: any[],
+    kind: "group" | "private",
+    scope: any,
+    reason: string,
+  ): Promise<string> {
+    const cfg: any = this.config || {};
+
+    // 每日上限
+    const day = new Date();
+    const dayStamp = `${day.getFullYear()}-${day.getMonth() + 1}-${day.getDate()}`;
+    const dailyKey = `${kind}:${scope.id}:${dayStamp}`;
+    const limit = Math.max(1, Number(cfg.memoryLearnDailyLimit) || 30);
+    const used = this.learnDaily.get(dailyKey) || 0;
+    if (used >= limit) {
+      this.host.logger?.info?.(`[memory-learn] 已达每日上限 ${limit}（${kind}:${scope.id}）`);
+      return "";
+    }
+
+    const prompt = buildSummaryPrompt(records, { kind, selfName: this.selfName });
+    let raw = "";
+    try {
+      const result = await this.provider.chat({
+        system: prompt.system,
+        user: prompt.user,
+        temperature: 0.3,
+        maxTokens: 400,
+      });
+      if (!result || !result.ok) {
+        this.host.logger?.warn?.(`[memory-learn] 归纳调用失败: ${result && result.error}`);
+        return "";
+      }
+      raw = String(result.text || "");
+    } catch (error: any) {
+      this.host.logger?.warn?.(`[memory-learn] 归纳异常: ${String(error)}`);
+      return "";
+    }
+
+    const maxChars = Math.max(40, Number(cfg.memoryLearnMaxChars) || 150);
+    let text = cleanSummary(raw, maxChars);
+    if (!text) return "";
+
+    // 去重
+    let existing: string[] = [];
+    try {
+      const content = await (this.host as any).readMemoryFile(scope);
+      existing = String(content || "")
+        .split(/\r?\n---\r?\n/)
+        .map((b: string) => b.trim())
+        .filter(Boolean)
+        .map((b: string) => b.split("\n").slice(1).join("\n").trim() || b);
+    } catch {
+      existing = [];
+    }
+    const threshold = Number(cfg.memoryLearnDuplicateThreshold) || 0.55;
+    if (isDuplicate(text, existing, threshold)) {
+      this.host.logger?.info?.(`[memory-learn] 跳过重复记忆（${kind}:${scope.id}）`);
+      return "";
+    }
+
+    try {
+      await (this.host as any).saveMemoryToFile("", text, scope, "自动归纳");
+      this.learnDaily.set(dailyKey, used + 1);
+    } catch (error: any) {
+      this.host.logger?.warn?.(`[memory-learn] 写入失败: ${String(error)}`);
+      return "";
+    }
+
+    this.host.logger?.info?.(`[memory-learn] 已记入 ${kind}:${scope.id}（${reason}） ${text.length}字`);
+    return text;
+  }
+
+  private findBot(): any {
+    const bots = (this.host as any)?.ctx?.bots || (this.host as any)?.bots || [];
+    return (bots || []).find((item: any) => item.platform === "onebot") || null;
   }
 
   // ---------------------------------------------------------------- 点名 / 跟随
@@ -357,11 +576,15 @@ export class AiEngine {
 
   // ---------------------------------------------------------------- 记忆
 
-  private async loadMemories(record: ChatRecord, state: GroupState): Promise<string[]> {
+  private async loadMemories(record: ChatRecord, state: GroupState, session?: any): Promise<string[]> {
     if (!this.config.enableMemory || this.config.memoryInAi === false) return [];
     let content = '';
     try {
-      content = await this.host.readMemoryFile();
+      // 按作用域读对应文件：群聊读该群，私聊读该用户
+      const scope = typeof (this.host as any).memoryScopeOf === 'function'
+        ? (this.host as any).memoryScopeOf(session)
+        : null;
+      content = await this.host.readMemoryFile(scope);
     } catch {
       return [];
     }
@@ -435,7 +658,7 @@ export class AiEngine {
 
     try {
       const allowPass = !mention && !followup;
-      const memories = await this.loadMemories(record, state);
+      const memories = await this.loadMemories(record, state, session);
       const hookCtx: AiHookContext = {
         session,
         groupId: String(session.guildId),

@@ -2,6 +2,30 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.4.1
+
+### 新增
+
+- **AI 自动归纳记忆（内建，不需要额外插件）**：
+  上下文挤满、最老的消息即将被丢弃时，把它们累计起来；达到阈值（`aiContextWindow × memoryLearnThresholdScale`）
+  或空闲满 `memoryLearnIdleHours`（默认 8h，且期间有新消息）后，交给模型归纳成一条不超过
+  `memoryLearnMaxChars`（默认 150 字）的记忆，去重后写入对应作用域的记忆文件，并回推到原会话。
+  - 私聊发私聊、群聊发对应群，不会串台。
+  - 写入前去重（相似度阈值 `memoryLearnDuplicateThreshold`），避免同一件事反复记。
+  - 每作用域每天上限 `memoryLearnDailyLimit`（默认 30 次），防刷额度。
+  - 总开关 `memoryAutoLearn`（默认关），生效范围 `memoryAutoLearnGroups` 白名单。
+  - 系统备注（复读等）与指令消息不参与归纳。
+
+## 1.4.0
+
+### 新增
+
+- **记忆按作用域分文件**：群聊写 `Memory_<群号>_群聊.md`，私聊写 `Memory_<QQ号>_私聊.md`。
+  不再把不同群、私聊的记忆混在一个文件里。可用 `memoryPerScope` 关闭以恢复旧行为。
+  `[memory]` 指令与 AI 引用都只读写当前会话对应的文件。
+- **`registerContextEvicted` 钩子**（aiHooks 接口版本升到 2）：上下文挤满时，把被挤出的消息
+  交给外部插件处理（自动归纳已内建，此钩子仅用于第三方扩展）。
+
 ## 1.3.1
 
 ### 文档
