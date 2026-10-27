@@ -35,6 +35,11 @@ export interface AiDeps {
     rng?: () => number;
     now?: () => number;
     fetchImpl?: typeof fetch;
+    /**
+     * 钩子注册表。主插件会传入进程级共享实例；不传则每次新建，
+     * 保证测试/多实例之间互不串钩子。
+     */
+    hooks?: AiHookRegistry;
 }
 export declare class AiEngine {
     readonly state: AiState;

@@ -236,6 +236,11 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
     isImageReference(value: any): boolean;
     extractImageCandidates(session: any, maxCount?: number): any[];
     detectImageMime(buffer: any, fallback?: string): string;
+    /**
+     * 把原始图片字节包成 data URL；BMP 会先转成 PNG。
+     * 视觉模型（DeepSeek 等）只认 webp/png/jpeg/gif，BMP 会被 400 拒掉。
+     */
+    buildImageDataUrl(buffer: any): string;
     resolveImageReferenceToDataUrl(ref: any, session: any): Promise<any>;
     fetchImageAsDataUrl(url: any, extraHeaders?: {}): Promise<any>;
     rememberImageDataUrl(url: any, dataUrl: any): void;
@@ -633,6 +638,25 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
 export function parseReminderText(rawText: any, now?: number): {
     at: number;
     content: string;
+};
+/**
+ * 记忆列表分页（纯函数，便于测试）。
+ *
+ * 第 1 页是最新的 5 条，页码越大越往前翻 —— 因为人最常看的就是刚记下的内容。
+ *
+ * @param {string[]} blocks 记忆块，按文件顺序（旧 → 新）
+ * @param {string|number} [rawPage] 用户传入的页码，缺省为 1
+ * @param {number} [pageSize] 每页条数，默认 5
+ * @returns {{page:number, totalPages:number, pageSize:number, items:Array<{seq:number,text:string}>}}
+ */
+export function paginateMemoryList(blocks: string[], rawPage?: string | number, pageSize?: number): {
+    page: number;
+    totalPages: number;
+    pageSize: number;
+    items: Array<{
+        seq: number;
+        text: string;
+    }>;
 };
 import koishi_1 = require("koishi");
 import { AiEngine } from "./ai/engine";

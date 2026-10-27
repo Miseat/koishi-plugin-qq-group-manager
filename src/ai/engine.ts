@@ -47,6 +47,11 @@ export interface AiDeps {
   rng?: () => number;
   now?: () => number;
   fetchImpl?: typeof fetch;
+  /**
+   * 钩子注册表。主插件会传入进程级共享实例；不传则每次新建，
+   * 保证测试/多实例之间互不串钩子。
+   */
+  hooks?: AiHookRegistry;
 }
 
 const PASS_RE = /^\s*<(?:pass\s*\/?|不回复)>/i;
@@ -108,7 +113,9 @@ export class AiEngine {
     this.host = host;
     this.config = host.config;
     this.state = deps.state ?? new AiState();
-    this.hooks = new AiHookRegistry(host.logger);
+    // 默认独立注册表；主插件通过 deps.hooks 注入进程级单例，
+    // 这样主插件重载后外部插件注册的钩子不会丢。
+    this.hooks = deps.hooks ?? new AiHookRegistry(host.logger);
     this.provider = deps.provider ?? new ChatProvider(host.config, host.logger);
     this.names = new NameResolver({
       getOneBotApi: (session) => host.getOneBotApi(session),

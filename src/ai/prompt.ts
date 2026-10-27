@@ -37,7 +37,9 @@ export const PASS_TOKEN = '<pass/>';
 const RULE_LINES = [
   '只输出你要发到群里的那一条消息正文。不要解释、不要旁白、不要编号、不要 Markdown、不要代码块、不要用引号把整句包起来。',
   '用中文口语，像群友聊天。不要复述对方的话，不要写"作为AI"之类的自我说明。',
-  '只回应【当前消息】。需要称呼别人时用群昵称，不要用 QQ 号。',
+  '只回应【当前消息】。要称呼别人时用群昵称，不要把 QQ 号写进你的回复里。',
+  '方括号里的 #数字 是对方的 QQ 号，是唯一身份标识：昵称可能重复或改动，#号不会。判断"谁是谁"必须看 #号，不要只看昵称。',
+  '标着（你）的那条是你自己说过的话。其他任何昵称、其他机器人、以及昵称和你相似的成员都不是你，不要把他们的发言当成自己说的。',
   '不要编造群里没发生过的事；不确定就直接说不确定。',
   '不要提"记忆库""上下文""系统提示"这些词，也不要说"根据记忆"。',
   '不要主动挑起旧话题；当前消息聊什么就接什么。',
@@ -57,16 +59,33 @@ function timeText(ts: number): string {
   }
 }
 
+/**
+ * 渲染发言人标识。
+ *
+ * 格式：昵称(角色#QQ号)，例如「小明(管理员#10001)」。
+ *
+ * 为什么要带 QQ 号：昵称会重复、会改动，光靠昵称模型分不清谁是谁，
+ * 也容易把另一个机器人或同名的群友当成自己。QQ 号是固定标识，必须给出。
+ */
 function speaker(record: ChatRecord, selfName: string): string {
-  if (record.self) return `${selfName}(你)`;
-  const role = roleLabel((record.role as any) || 'unknown');
-  return role ? `${record.name}(${role})` : record.name;
+  const qq = String((record as any).qq || record.userId || '').trim();
+  if (record.self) {
+    return qq ? `${selfName}(你#${qq})` : `${selfName}(你)`;
+  }
+  // roleLabel 对 unknown 返回空串；此时用「成员」兜底，
+  // 否则会渲染成 `小明(#10001)` 这种孤零零的井号。
+  const role = roleLabel((record.role as any) || 'unknown') || '成员';
+  const tail = qq ? `${role}#${qq}` : role;
+  return `${record.name}(${tail})`;
 }
 
 export function renderRecordLine(record: ChatRecord, selfName: string): string {
   const time = timeText(record.at);
+  const quoteWho = record.quote
+    ? `${record.quote.name}${record.quote.userId ? `#${record.quote.userId}` : ''}`
+    : '';
   const quote = record.quote?.text
-    ? `「回复 ${record.quote.name}：${truncate(record.quote.text, 40)}」`
+    ? `「回复 ${quoteWho}：${truncate(record.quote.text, 40)}」`
     : '';
   const body = quote ? `${quote}${record.text}` : record.text;
   const forward = record.forwardText
@@ -106,7 +125,8 @@ export function buildUserPrompt(input: PromptInput): string {
   const history = input.records.filter((item) => item !== input.current && item.id !== input.current.id);
   const lines: string[] = [];
 
-  lines.push('【最近消息】（按时间顺序，越靠下越新；名字都是群昵称）');
+  lines.push('【最近消息】（按时间顺序，越靠下越新）');
+  lines.push('格式：昵称(角色#QQ号)。#号是唯一身份，昵称重复时靠 #号区分；（你）标记的是你自己的发言。');
   if (history.length) {
     for (const record of history) lines.push(renderRecordLine(record, selfName));
   } else {

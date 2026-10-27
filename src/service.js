@@ -8,11 +8,37 @@ const koishi_1 = require("koishi");
 const node_path_1 = __importDefault(require("node:path"));
 const node_fs_1 = __importDefault(require("node:fs"));
 const { AiEngine } = require("./ai/engine");
+const { getSharedAiHooks } = require("./ai/hooks");
+const { getAiRuntimeFacade } = require("./ai/runtime");
 let PLUGIN_VERSION = 'unknown';
 try {
     PLUGIN_VERSION = require('../package.json').version || 'unknown';
 }
 catch { /* ignore */ }
+
+/**
+ * 记忆列表分页（纯函数，便于测试）。
+ *
+ * 第 1 页是最新的 5 条，页码越大越往前翻 —— 因为人最常看的就是刚记下的内容。
+ *
+ * @param {string[]} blocks 记忆块，按文件顺序（旧 → 新）
+ * @param {string|number} [rawPage] 用户传入的页码，缺省为 1
+ * @param {number} [pageSize] 每页条数，默认 5
+ * @returns {{page:number, totalPages:number, pageSize:number, items:Array<{seq:number,text:string}>}}
+ */
+function paginateMemoryList(blocks, rawPage, pageSize = 5) {
+    const size = Math.max(1, Math.floor(pageSize) || 5);
+    const list = Array.isArray(blocks) ? blocks : [];
+    const totalPages = Math.max(1, Math.ceil(list.length / size));
+    const parsed = parseInt(String(rawPage ?? '').trim(), 10);
+    const page = Math.min(totalPages, Math.max(1, Number.isFinite(parsed) ? parsed : 1));
+    // 从末尾往前取：第 1 页 = 最新的 size 条
+    const end = list.length - (page - 1) * size;
+    const start = Math.max(0, end - size);
+    const items = list.slice(start, end).map((text, i) => ({ seq: start + i + 1, text }));
+    return { page, totalPages, pageSize: size, items };
+}
+
 /** 解析“提醒/定时”文本；返回 { at, content } 或 null。纯函数，便于测试。 */
 function parseReminderText(rawText, now = Date.now()) {
     let text = String(rawText || '')
@@ -260,22 +286,32 @@ class QQGroupManagerService extends koishi_1.Service {
         this.ctx = ctx;
         this.config = config;
         this._logger = ctx.logger('nestim-qq-group-manager');
-        this.ai = new AiEngine(this);
+        // 进程级共享钩子：主插件重载后仍是同一个对象，外部插件注册的钩子不会丢。
+        const sharedHooks = getSharedAiHooks(this._logger);
+        this.ai = new AiEngine(this, { hooks: sharedHooks });
         // Koishi 的 Service 注册在插件 fork 作用域，兄弟插件的 inject 拿不到；
-        // 额外把扩展点挂到 root，外部插件 inject 'qqgmAiHooks' 即可。
+        // 额外把扩展点挂到 root，外部插件运行时探测即可。
+        //
+        // 关键：hooks 与 runtime 都必须是「进程级稳定对象」。主插件单独重载
+        // 时不能换成新对象，否则 meme / chat-style / private 手里的旧引用会
+        // 指向已销毁的实例：新引擎看不到它们的钩子（表情包不发、风格段丢失），
+        // 私聊还会继续用旧配置和旧引擎。
         try {
-            ctx.root.set('qqgmAiHooks', this.ai.hooks);
-            const runtime = {
-                config: this.config,
-                hooks: this.ai.hooks,
-                chat: (request) => this.ai.chat(request),
-            };
-            ctx.root.set('qqgmAiRuntime', runtime);
+            const hooks = sharedHooks;
+            const facade = getAiRuntimeFacade();
+            facade.bind(this);
+            ctx.root.set('qqgmAiHooks', hooks);
+            ctx.root.set('qqgmAiRuntime', facade);
             ctx.on('dispose', () => {
                 try {
-                    if (ctx.root.get('qqgmAiHooks') === this.ai.hooks)
+                    facade.unbind(this);
+                    // 只有当前没有新实例接管时才撤掉对外暴露：旧实例的 dispose
+                    // 可能晚于新实例的 bind，此时不能把新指针清掉。
+                    if (facade.current)
+                        return;
+                    if (ctx.root.get('qqgmAiHooks') === hooks)
                         ctx.root.set('qqgmAiHooks', undefined);
-                    if (ctx.root.get('qqgmAiRuntime')?.hooks === this.ai.hooks)
+                    if (ctx.root.get('qqgmAiRuntime') === facade)
                         ctx.root.set('qqgmAiRuntime', undefined);
                 }
                 catch { /* ignore */ }
@@ -971,6 +1007,24 @@ class QQGroupManagerService extends koishi_1.Service {
             return 'image/bmp';
         return fallback;
     }
+    /**
+     * 把原始图片字节包成 data URL；BMP 会先转成 PNG。
+     * 视觉模型（DeepSeek 等）只认 webp/png/jpeg/gif，BMP 会被 400 拒掉。
+     */
+    buildImageDataUrl(buffer) {
+        if (!buffer || !buffer.length)
+            return '';
+        if (bmp_1.isBmp(buffer)) {
+            const png = bmp_1.bmpToPng(buffer);
+            if (png && png.length) {
+                this._logger?.info?.(`[vision] BMP 已转为 PNG（${buffer.length} → ${png.length} 字节）`);
+                return `data:image/png;base64,${png.toString("base64")}`;
+            }
+            this._logger?.warn?.('[vision] BMP 转 PNG 失败，跳过这张图');
+            return '';
+        }
+        return `data:${this.detectImageMime(buffer)};base64,${buffer.toString("base64")}`;
+    }
     async resolveImageReferenceToDataUrl(ref, session) {
         const value = String(ref ?? '').trim();
         if (!value)
@@ -988,7 +1042,7 @@ class QQGroupManagerService extends koishi_1.Service {
                 const buffer = Buffer.from(raw, 'base64');
                 if (!buffer.length)
                     return '';
-                return `data:${this.detectImageMime(buffer)};base64,${buffer.toString('base64')}`;
+                return this.buildImageDataUrl(buffer);
             }
             if (/^https?:\/\//i.test(value)) {
                 // OneBot 的 get_image 能把 file_id 换成可访问链接
@@ -1020,7 +1074,7 @@ class QQGroupManagerService extends koishi_1.Service {
                     try {
                         const buffer = await node_fs_1.default.promises.readFile(finalUrl);
                         if (buffer.length)
-                            return `data:${this.detectImageMime(buffer)};base64,${buffer.toString('base64')}`;
+                            return this.buildImageDataUrl(buffer);
                     }
                     catch {
                         return '';
@@ -1031,7 +1085,7 @@ class QQGroupManagerService extends koishi_1.Service {
                 const localPath = value.replace(/^file:\/\//i, '');
                 const buffer = await node_fs_1.default.promises.readFile(localPath).catch(() => null);
                 if (buffer?.length)
-                    return `data:${this.detectImageMime(buffer)};base64,${buffer.toString('base64')}`;
+                    return this.buildImageDataUrl(buffer);
             }
             return '';
         }
@@ -2233,8 +2287,11 @@ class QQGroupManagerService extends koishi_1.Service {
             return null;
         let keyword = raw;
         let score = null;
-        // 支持 "关键词|分值"、全角竖线、逗号分隔
-        const m = raw.match(/^(.+?)\s*[|｜,，:：]\s*(\d{1,3})$/);
+        // 支持 "关键词|分值"、全角竖线、逗号、冒号分隔。
+        // 分值允许任意位数（有人会写 10000 想让它必触发），最终统一夹到 0..100。
+        // 旧版 \d{1,3} 只能匹配 1~3 位，写 1000 以上会解析失败并回落到默认分值，
+        // 表现为「加了高分值反而不触发」。
+        const m = raw.match(/^(.+?)\s*[|｜,，:：]\s*(\d+)\s*$/);
         if (m) {
             keyword = m[1].trim();
             const parsed = parseInt(m[2], 10);
@@ -2914,15 +2971,28 @@ class QQGroupManagerService extends koishi_1.Service {
             await session.send(this.styleText(r.ok ? `已删除 ${r.removed} 条记忆。` : `删除失败：${r.message}`));
             return true;
         }
-        if (/^(?:list|all)$/i.test(sub)) {
+        // 列出：[memory] list [页码] —— 每页 5 条，默认最新一页（从最近的往前翻）
+        const listMatch = sub.match(/^(?:list|all)\s*(\d+)?\s*$/i);
+        if (listMatch) {
             const mscope = this.memoryScopeOf(session);
             const blocks = this.extractMemoryBlocks(await this.readMemoryFile(mscope));
             if (!blocks.length) {
                 await session.send(this.styleText('记忆库为空。'));
                 return true;
             }
-            const show = blocks.slice(-10).map((b, i) => `${i + 1}. ${b.replace(/\n+/g, ' ').trim()}`).join('\n');
-            await session.send(this.styleText(`记忆库共 ${blocks.length} 条（显示最近 10 条）：\n${show}`));
+            const prefix = this.cmdPrefix('cmdMemory', '[memory]');
+            const result = paginateMemoryList(blocks, listMatch[1], 5);
+            const lines = [`记忆库共 ${blocks.length} 条，第 ${result.page}/${result.totalPages} 页：`];
+            for (const item of result.items) {
+                lines.push(`${item.seq}. ${item.text.replace(/\n+/g, ' ').trim()}`);
+            }
+            lines.push('');
+            lines.push(
+                result.totalPages > 1
+                    ? `翻页：${prefix} list 1~${result.totalPages}`
+                    : `翻页：暂时只有一页`,
+            );
+            await session.send(this.styleText(lines.join('\n')));
             return true;
         }
         // 查询：[memory] search 关键词 / [memory] query 关键词 / [memory] find 关键词
@@ -3760,3 +3830,4 @@ class QQGroupManagerService extends koishi_1.Service {
 }
 exports.QQGroupManagerService = QQGroupManagerService;
 exports.parseReminderText = parseReminderText;
+exports.paginateMemoryList = paginateMemoryList;

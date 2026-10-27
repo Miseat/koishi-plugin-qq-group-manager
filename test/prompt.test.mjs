@@ -54,8 +54,8 @@ test('上下文严格按时间顺序，当前消息只出现一次', () => {
 
 test('群名片与角色会出现在提示词里', () => {
   const { user } = buildReplyPrompt(input());
-  assert.match(user, /冬木\(管理员\)/);
-  assert.match(user, /段云翔\(成员\)/);
+  assert.match(user, /冬木\(管理员#2\)/);
+  assert.match(user, /段云翔\(成员#3\)/);
 });
 
 test('引用内容以「回复 某某」形式出现', () => {
@@ -66,14 +66,14 @@ test('引用内容以「回复 某某」形式出现', () => {
     quote: { userId: '3', name: '段云翔', text: '账号还是自己养吧' },
   });
   const { user } = buildReplyPrompt(input({ current, records: [current] }));
-  assert.match(user, /「回复 段云翔：账号还是自己养吧」/);
+  assert.match(user, /「回复 段云翔#3：账号还是自己养吧」/);
 });
 
 test('机器人自己的历史发言显示为「你」', () => {
   const current = rec({ id: 'cur3', text: '你刚才说什么？' });
-  const self = rec({ id: 's1', name: 'MeowBot', self: true, text: '我说的是明天下午' });
+  const self = rec({ id: 's1', userId: '9999', name: 'MeowBot', self: true, text: '我说的是明天下午' });
   const { user } = buildReplyPrompt(input({ current, records: [self, current] }));
-  assert.match(user, /MeowBot\(你\): 我说的是明天下午/);
+  assert.match(user, /MeowBot\(你#9999\): 我说的是明天下午/);
 });
 
 test('允许 pass 时系统提示包含 pass 规则，点名时不包含', () => {

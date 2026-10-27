@@ -76,15 +76,33 @@ export class ChatProvider {
 
     if (result.ok) return { ...result, text: stripFence(result.text || '') };
 
-    // 图片被拒（常见于 deepseek 等不支持 vision 的模型）→ 记住并去掉图片重试一次
-    if (images.length && (result.status === 400 || result.status === 422 || /image|vision|multimodal/i.test(result.error || ''))) {
-      this.visionUnsupported = true;
-      this.logger?.warn?.(`[ai] 模型不支持图片(${result.status ?? '?'})，后续自动跳过图片: ${result.error}`);
-      const fallback = provider === 'gemini'
-        ? await this.callGemini(request, [])
-        : await this.callOpenAi(request, []);
-      if (fallback.ok) return { ...fallback, text: stripFence(fallback.text || ''), degradedToText: true };
-      return fallback;
+    if (images.length) {
+      const errorText = String(result.error || '');
+      const rejected = result.status === 400
+        || result.status === 422
+        || /image|vision|multimodal/i.test(errorText);
+
+      if (rejected) {
+        // 「格式不对」和「模型不支持视觉」是两件事，必须分开处理。
+        // 前者只跳过这一次，后者才记进 visionUnsupported。
+        const formatProblem = /unsupported image|invalid image|image format|must be|one of the following formats|too large|dimension/i.test(errorText);
+        if (!formatProblem) {
+          this.visionUnsupported = true;
+          this.logger?.warn?.(
+            `[ai] 模型不支持图片(${result.status ?? '?'})，后续自动跳过图片: ${errorText}`,
+          );
+        } else {
+          this.logger?.warn?.(
+            `[ai] 本次图片格式不被接受(${result.status ?? '?'})，仅跳过本次，不影响后续: ${errorText}`,
+          );
+        }
+
+        const fallback = provider === 'gemini'
+          ? await this.callGemini(request, [])
+          : await this.callOpenAi(request, []);
+        if (fallback.ok) return { ...fallback, text: stripFence(fallback.text || ''), degradedToText: true };
+        return fallback;
+      }
     }
     return result;
   }

@@ -54,6 +54,15 @@ export declare class AiHookRegistry {
     private afterReplyHandlers;
     private evictedHandlers;
     constructor(logger?: any);
+    /** 主插件重载后把新实例的 logger 接到同一个注册表上。 */
+    setLogger(logger?: any): void;
+    /** 诊断用：当前已注册的钩子数量。 */
+    stats(): {
+        sections: number;
+        filters: number;
+        afterReply: number;
+        evicted: number;
+    };
     registerPromptSection(provider: PromptSectionProvider): () => void;
     registerOutputFilter(filter: OutputFilter): () => void;
     /** 文字回复已发送后触发；用于追加表情包等后续动作。 */
@@ -72,3 +81,4 @@ export declare class AiHookRegistry {
     /** 上下文挤出后执行；单个 handler 失败只记日志，不影响其它。 */
     runContextEvicted(ctx: ContextEvictedContext): Promise<void>;
 }
+export declare function getSharedAiHooks(logger?: any): AiHookRegistry;

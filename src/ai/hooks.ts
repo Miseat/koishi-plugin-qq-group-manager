@@ -64,6 +64,21 @@ export class AiHookRegistry {
 
   constructor(private logger?: any) {}
 
+  /** 主插件重载后把新实例的 logger 接到同一个注册表上。 */
+  setLogger(logger?: any): void {
+    if (logger) this.logger = logger;
+  }
+
+  /** 诊断用：当前已注册的钩子数量。 */
+  stats(): { sections: number; filters: number; afterReply: number; evicted: number } {
+    return {
+      sections: this.sections.size,
+      filters: this.filters.size,
+      afterReply: this.afterReplyHandlers.size,
+      evicted: this.evictedHandlers.size,
+    };
+  }
+
   registerPromptSection(provider: PromptSectionProvider): () => void {
     this.sections.add(provider);
     return () => this.sections.delete(provider);
@@ -140,4 +155,34 @@ export class AiHookRegistry {
       }
     }
   }
+}
+
+/**
+ * 进程级共享的钩子注册表。
+ *
+ * 背景：meme / chat-style / private 等外部插件只在启动时解析一次
+ * `qqgmAiHooks`，之后一直持有这个对象。如果主插件每次重载都 `new` 一个
+ * 新注册表，新引擎看到的是空注册表，而外部插件还挂在旧对象上——表现就是
+ * 主插件单独重启后表情包不发、聊天风格段消失、私聊用旧配置。
+ *
+ * 用 globalThis + Symbol.for 做单例：即使插件模块被重新 require、甚至从
+ * 不同路径加载了两份，拿到的也是同一个注册表，重载前后对象身份不变。
+ */
+const SHARED_HOOKS = Symbol.for('qqgm.ai-hooks-registry');
+
+export function getSharedAiHooks(logger?: any): AiHookRegistry {
+  const store = globalThis as any;
+  let registry: AiHookRegistry = store[SHARED_HOOKS];
+  if (!registry) {
+    registry = new AiHookRegistry(logger);
+    store[SHARED_HOOKS] = registry;
+    logger?.info?.(`[ai-hooks] v${registry.version} 注册表已创建（进程级单例）`);
+  } else if (logger) {
+    registry.setLogger(logger);
+    const stats = registry.stats();
+    logger.info?.(
+      `[ai-hooks] 复用进程级注册表：风格段 ${stats.sections} / 过滤器 ${stats.filters} / 后处理 ${stats.afterReply}`,
+    );
+  }
+  return registry;
 }

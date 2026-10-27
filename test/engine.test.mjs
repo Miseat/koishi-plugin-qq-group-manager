@@ -199,16 +199,16 @@ test('引用消息的正文会进入提示词', async () => {
     quote: { content: '账号还是自己养吧', user: { id: '1', name: '段云翔' } },
   });
   await engine.handle(session);
-  assert.match(provider.calls[0].user, /「回复 段云翔：账号还是自己养吧」/);
+  assert.match(provider.calls[0].user, /「回复 段云翔#1：账号还是自己养吧」/);
 });
 
-test('群名片进入提示词而不是 QQ 号', async () => {
+test('群名片与 QQ 号同时进入提示词（QQ 号仅用于身份判断）', async () => {
   const config = makeConfig({ aiMessageThreshold: 1 });
   const provider = makeProvider('好的');
   const engine = new AiEngine(makeHost(config), { provider });
   await engine.handle(textSession('说个事'));
-  assert.match(provider.calls[0].user, /冬木\(管理员\)/);
-  assert.doesNotMatch(provider.calls[0].user, /320557068/);
+  assert.match(provider.calls[0].user, /冬木\(管理员#320557068\)/, '群名片与 QQ 号都要有');
+  assert.match(provider.calls[0].user, /#320557068/, 'QQ 号应出现在提示词里供判断');
 });
 
 test('模型报错时不发送、不重置计数', async () => {
