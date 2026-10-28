@@ -171,6 +171,7 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiPseudoRandomStep: Schema<number, number>;
     aiMinReplyIntervalSeconds: Schema<number, number>;
     aiContextWindow: Schema<number, number>;
+    persistAiState: Schema<boolean, boolean>;
     aiContextMaxChars: Schema<number, number>;
     aiStyleMaxChars: Schema<number, number>;
     aiTemperature: Schema<number, number>;
@@ -337,6 +338,7 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiPseudoRandomStep: number;
     aiMinReplyIntervalSeconds: number;
     aiContextWindow: number;
+    persistAiState: boolean;
     aiContextMaxChars: number;
     aiStyleMaxChars: number;
     aiTemperature: number;

@@ -47,6 +47,7 @@ test('新配置项有合理默认值', () => {
   assert.equal(config.aiPseudoRandomStep, 0.01);
   assert.equal(config.aiMaxReplyChars, 120);
   assert.equal(config.aiMaxOutputTokens, 1500);
+  assert.equal(config.persistAiState, true);
   assert.equal(config.aiContextWindow, 30);
   assert.equal(config.aiImageBudgetMs, 6000);
   assert.equal(config.aiRequestTimeoutSeconds, 20);

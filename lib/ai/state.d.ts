@@ -56,5 +56,9 @@ export declare class AiState {
     private groups;
     get(key: string): GroupState;
     peek(key: string): GroupState | undefined;
+    /** 持久化用：遍历所有会话状态 */
+    entries(): Array<[string, GroupState]>;
+    /** 持久化用：恢复一个会话状态 */
+    set(key: string, state: GroupState): void;
     clear(): void;
 }

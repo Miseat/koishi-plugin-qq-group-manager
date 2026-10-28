@@ -101,13 +101,21 @@ npm i @nestim/koishi-plugin-qq-group-manager
 | `memoryLearnPushBack` | `true` | 归纳后回推原会话（私聊发私聊、群聊发对应群） |
 | `memoryLearnDuplicateThreshold` | `0.55` | 相似度超此值跳过，避免重复记 |
 | `memoryLearnDailyLimit` | `30` | 每作用域每天最多归纳次数 |
+| `memoryLearnConsolidate` | `true` | 自动记忆压缩：每 N 条合并成 1 条 |
+| `memoryLearnConsolidateEvery` | `5` | 每多少条自动记忆压缩一次 |
+| `memoryLearnMaxEntries` | `15` | 自动记忆条数上限（不含手动 `[memory]`） |
+| `memoryLearnConsolidateMaxChars` | `90` | 压缩后单条记忆字数上限 |
+| `memoryLearnModel` | 空 | 归纳/压缩专用模型，留空沿用 `aiModel` |
 | `blacklistFileName` | `banMember.md` | 黑名单文件名模板，实际为 `banMember_<群号>.md` |
 | `pendingJoinFileName` | `JoinRequests.md` | 待审入群申请落盘文件名 |
 | `enableJoinRequestReview` | `true` | 是否发起入群审核 |
 | `enableAiReply` | `false` | AI 回复总开关（建议配合 `aiReplyRequireGroupRule` 逐群开启） |
 | `aiReplyRequireGroupRule` | `true` | 仅对已在 `groupRules` 中单独配置的群启用 AI 回复 |
 | `aiContextWindow` | `30` | 进入提示词的消息条数（建议 20~40） |
-| `aiReplyDecision` | `single` | `single` 一次调用（推荐）/ `two-stage` 两次调用 |
+| `persistAiState` | `true` | 重启后恢复最近上下文、未归纳消息、计数与冷却（保存到 `data/qqgm-ai-state.json`，只存文本） |
+| `aiMaxOutputTokens` | `1500` | 思考 + 回答的总 token 上限（`max_tokens`），不是只限制正文 |
+| `aiPseudoRandom` | `true` | 随机未命中时逐步提高概率，到 1 必定回复 |
+| `aiPseudoRandomStep` | `0.01` | 每次未命中增加的概率 |
 | `aiMaxReplyChars` | `120` | 单条回复最大字符数 |
 | `aiQuoteReplyMode` | `random` | 回复是否引用触发消息：`random` / `always` / `never` |
 | `aiQuoteReplyProbability` | `0.5` | `random` 模式下的引用概率 |
@@ -241,6 +249,7 @@ export function apply(ctx) {
 | `Memory_<QQ号>_私聊.md` | 与该用户的私聊记忆 |
 | `banMember_<群号>.md` | 各群黑名单，`## QQ号 · 备注` + 加入时间 |
 | `JoinRequests.md` | 待审入群申请（人类可读表格 + 机器可读区段），重启自动恢复、过期自动清理 |
+| `qqgm-ai-state.json` | AI 上下文与未归纳消息的持久化快照（`persistAiState`，只存文本、不存图片） |
 
 ## 权限模型
 

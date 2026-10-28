@@ -93,6 +93,16 @@ export class AiState {
     return this.groups.get(key);
   }
 
+  /** 持久化用：遍历所有会话状态 */
+  entries(): Array<[string, GroupState]> {
+    return [...this.groups.entries()];
+  }
+
+  /** 持久化用：恢复一个会话状态 */
+  set(key: string, state: GroupState): void {
+    this.groups.set(key, state);
+  }
+
   clear(): void {
     this.groups.clear();
   }

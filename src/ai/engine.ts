@@ -13,6 +13,8 @@
  */
 
 import { AiState, GroupState, ChatRecord, FollowupState } from './state';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   LearnBucket,
   LearnStore,
@@ -142,6 +144,9 @@ export class AiEngine {
   private learnDaily = new Map<string, number>();
   /** 自动归纳：空闲兜底定时器 */
   private learnTimer: any = null;
+  /** 状态持久化：退出/定时把上下文与待归纳桶写到 data/qqgm-ai-state.json */
+  private persistEnabled = true;
+  private persistTimer: any = null;
 
   constructor(host: AiHost, deps: AiDeps = {}) {
     this.host = host;
@@ -160,8 +165,213 @@ export class AiEngine {
     this.now = deps.now ?? Date.now;
     this.fetchImpl = deps.fetchImpl ?? globalThis.fetch;
 
+    // 只有配置明确为 true 才持久化。生产环境 Schema 默认就是 true；
+    // 测试里用裸对象构造引擎时不会误写/误读仓库目录下的状态文件。
+    this.persistEnabled = host.config?.persistAiState === true;
+    this.restorePersistedState();
+
     // 空闲兜底：消息量迟迟不满阈值时，超时后归纳一次
     this.startLearnTimer();
+  }
+
+  // ---------------------------------------------------------------- 持久化
+
+  /** 持久化文件路径（Koishi 数据目录下） */
+  private stateFilePath(): string {
+    const base = (this.host as any)?.ctx?.baseDir || process.cwd();
+    return path.join(base, 'data', 'qqgm-ai-state.json');
+  }
+
+  /** 精简一条记录用于落盘：去掉图片（Data URL 太大），文本做上限 */
+  private slimRecord(record: ChatRecord): any {
+    return {
+      id: String(record.id || ''),
+      userId: String(record.userId || ''),
+      name: String(record.name || ''),
+      role: record.role || 'unknown',
+      text: String(record.text || '').slice(0, 600),
+      quote: record.quote
+        ? {
+          name: String((record.quote as any).name || ''),
+          userId: String((record.quote as any).userId || ''),
+          text: String((record.quote as any).text || '').slice(0, 200),
+          id: String((record.quote as any).id || ''),
+        }
+        : undefined,
+      forwardText: record.forwardText ? String(record.forwardText).slice(0, 1200) : undefined,
+      mentions: Array.isArray(record.mentions) ? record.mentions.map(String).slice(0, 20) : [],
+      atBot: !!record.atBot,
+      self: !!record.self,
+      at: Number(record.at) || 0,
+      command: record.command ? true : undefined,
+    };
+  }
+
+  private reviveRecord(raw: any): ChatRecord | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const text = String(raw.text || '').trim();
+    if (!text && !raw.command) return null;
+    return {
+      id: String(raw.id || `restored-${Math.random().toString(36).slice(2, 8)}`),
+      userId: String(raw.userId || ''),
+      name: String(raw.name || raw.userId || ''),
+      role: raw.role || 'unknown',
+      text,
+      images: [],
+      quote: raw.quote?.text
+        ? {
+          name: String(raw.quote.name || ''),
+          userId: String(raw.quote.userId || ''),
+          text: String(raw.quote.text || ''),
+          id: String(raw.quote.id || ''),
+          images: [],
+        }
+        : undefined,
+      forwardText: raw.forwardText ? String(raw.forwardText) : undefined,
+      mentions: Array.isArray(raw.mentions) ? raw.mentions.map(String) : [],
+      atBot: !!raw.atBot,
+      self: !!raw.self,
+      at: Number(raw.at) || 0,
+      command: !!raw.command,
+    };
+  }
+
+  /**
+   * 恢复上次退出时的状态。
+   *
+   * - 最近上下文：只恢复 6 小时以内的，避免重启后把很久以前的消息当成“最近”；
+   * - 未归纳消息桶：全部恢复（它们还没变成记忆，丢了就真丢了）；
+   * - 计数、模型调用冷却、伪随机加成、点名跟随：一并恢复。
+   */
+  private restorePersistedState(): void {
+    if (!this.persistEnabled) return;
+    const file = this.stateFilePath();
+    let data: any;
+    try {
+      data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      return;
+    }
+    if (!data || data.version !== 1) return;
+
+    const now = this.now();
+    const ttl = 6 * 60 * 60 * 1000;
+    let groups = 0;
+    let learns = 0;
+
+    for (const [key, raw] of Object.entries(data.groups || {})) {
+      const item: any = raw;
+      if (!item || typeof item !== 'object') continue;
+      const st = new GroupState();
+      st.counter = Math.max(0, Number(item.counter) || 0);
+      st.lastAttemptAt = Math.max(0, Number(item.lastAttemptAt) || 0);
+      st.lastCooldownNoticeAt = Math.max(0, Number(item.lastCooldownNoticeAt) || 0);
+      st.randomBoost = Math.min(1, Math.max(0, Number(item.randomBoost) || 0));
+      const followup = item.followup;
+      if (followup && Number(followup.expiresAt) > now && typeof followup.userId === 'string') {
+        st.followup = followup as FollowupState;
+      }
+      st.records = (Array.isArray(item.records) ? item.records : [])
+        .map((record: any) => this.reviveRecord(record))
+        .filter((record: ChatRecord | null): record is ChatRecord => !!record)
+        .filter((record: ChatRecord) => now - record.at <= ttl);
+      if (st.records.length > this.contextWindow) {
+        st.records = st.records.slice(-this.contextWindow);
+      }
+      if (!st.records.length) {
+        st.counter = 0;
+        st.followup = null;
+        // 上下文过期就不恢复这个会话，避免凭空出现一个空状态
+        continue;
+      }
+      this.state.set(key, st);
+      groups += 1;
+    }
+
+    for (const [key, raw] of Object.entries(data.learn || {})) {
+      const item: any = raw;
+      const idx = key.indexOf(':');
+      if (idx < 0 || !item || typeof item !== 'object') continue;
+      const bucket = new LearnBucket();
+      bucket.records = (Array.isArray(item.records) ? item.records : [])
+        .map((record: any) => this.reviveRecord(record))
+        .filter((record: ChatRecord | null): record is ChatRecord => !!record);
+      bucket.lastActivityAt = Number(item.lastActivityAt) || 0;
+      bucket.lastLearnedAt = Number(item.lastLearnedAt) || 0;
+      if (!bucket.records.length) continue;
+      this.learnStore.set(key.slice(0, idx), key.slice(idx + 1), bucket);
+      learns += 1;
+    }
+
+    for (const pair of Array.isArray(data.learnDaily) ? data.learnDaily : []) {
+      if (Array.isArray(pair) && pair.length === 2) {
+        this.learnDaily.set(String(pair[0]), Math.max(0, Number(pair[1]) || 0));
+      }
+    }
+
+    if (groups || learns) {
+      this.host.logger?.info?.(`[ai-state] 已恢复 ${groups} 个会话、${learns} 个待归纳桶`);
+    }
+  }
+
+  /** 落盘当前状态（同步、原子替换，dispose 时调用） */
+  private flushPersistedState(): void {
+    if (!this.persistEnabled) return;
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    try {
+      const file = this.stateFilePath();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.snapshotState()), 'utf8');
+      fs.renameSync(tmp, file);
+    } catch (error: any) {
+      this.host.logger?.warn?.(`[ai-state] 保存失败: ${String(error)}`);
+    }
+  }
+
+  private snapshotState(): any {
+    const groups: Record<string, any> = {};
+    for (const [key, st] of this.state.entries()) {
+      if (!st.records.length && !st.counter && !st.randomBoost) continue;
+      groups[key] = {
+        counter: st.counter,
+        lastAttemptAt: st.lastAttemptAt,
+        lastCooldownNoticeAt: st.lastCooldownNoticeAt,
+        randomBoost: st.randomBoost,
+        followup: st.followup,
+        records: st.records.map((record) => this.slimRecord(record)),
+      };
+    }
+
+    const learn: Record<string, any> = {};
+    for (const item of this.learnStore.entries()) {
+      learn[`${item.kind}:${item.scopeId}`] = {
+        lastActivityAt: item.bucket.lastActivityAt,
+        lastLearnedAt: item.bucket.lastLearnedAt,
+        records: item.bucket.records.map((record) => this.slimRecord(record as ChatRecord)),
+      };
+    }
+
+    return {
+      version: 1,
+      savedAt: this.now(),
+      groups,
+      learn,
+      learnDaily: [...this.learnDaily.entries()],
+    };
+  }
+
+  /** 防抖落盘：状态变化频繁，最多 3 秒写一次 */
+  private schedulePersist(): void {
+    if (!this.persistEnabled || this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      this.flushPersistedState();
+    }, 3000);
+    if (this.persistTimer.unref) this.persistTimer.unref();
   }
 
   // ---------------------------------------------------------------- 配置
@@ -318,6 +528,7 @@ export class AiEngine {
     const evicted = state.push(record, contextWindow);
     this.emitEvicted(evicted, key, session);
     state.counter += 1;
+    this.schedulePersist();
     return record;
   }
 
@@ -343,6 +554,7 @@ export class AiEngine {
       this.contextWindow,
     );
     this.emitEvicted(evicted, groupKey, session);
+    this.schedulePersist();
   }
 
   /** 机器人自己发出的消息：写回上下文，解决"说完就忘" */
@@ -366,6 +578,7 @@ export class AiEngine {
       this.contextWindow,
     );
     this.emitEvicted(evicted, key, session);
+    this.schedulePersist();
   }
 
   /**
@@ -426,6 +639,7 @@ export class AiEngine {
     const bucket = this.learnStore.get(kind, scopeId);
     const threshold = Math.max(1, Math.round(this.contextWindow * (Number(cfg.memoryLearnThresholdScale) || 1)));
     const fire = bucket.push(evicted, threshold, this.now());
+    this.schedulePersist();
     if (fire) {
       void this.learnAndReport(kind, scopeId, bucket, "threshold", session);
     }
@@ -452,8 +666,9 @@ export class AiEngine {
     if (this.learnTimer.unref) this.learnTimer.unref();
   }
 
-  /** 资源清理：停止定时器、清空缓存 */
+  /** 资源清理：落盘状态、停止定时器、清空缓存 */
   dispose(): void {
+    this.flushPersistedState();
     if (this.learnTimer) {
       clearInterval(this.learnTimer);
       this.learnTimer = null;
@@ -474,6 +689,7 @@ export class AiEngine {
     const cfg: any = this.config || {};
     const records = bucket.drain();
     if (!records.length) return;
+    this.schedulePersist();
 
     const scope = { kind, id: scopeId } as any;
     const saved = await this.summarizeRecords(records, kind, scope, reason);
@@ -1019,6 +1235,7 @@ export class AiEngine {
       }, session);
     } finally {
       state.inFlight = false;
+      this.schedulePersist();
     }
   }
 
@@ -1232,5 +1449,6 @@ export class AiEngine {
   clear(): void {
     this.state.clear();
     this.names.clear();
+    this.flushPersistedState();
   }
 }

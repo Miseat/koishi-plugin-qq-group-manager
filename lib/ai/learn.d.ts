@@ -38,6 +38,14 @@ export declare class LearnStore {
         scopeId: string;
         bucket: LearnBucket;
     }>;
+    /** 持久化用：遍历所有待归纳桶 */
+    entries(): Array<{
+        kind: string;
+        scopeId: string;
+        bucket: LearnBucket;
+    }>;
+    /** 持久化用：恢复一个待归纳桶 */
+    set(kind: string, scopeId: string, bucket: LearnBucket): void;
     clear(): void;
 }
 /** 把一批消息渲染成模型可读的文本 */

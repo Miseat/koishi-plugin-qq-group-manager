@@ -72,7 +72,28 @@ export declare class AiEngine {
     private learnDaily;
     /** 自动归纳：空闲兜底定时器 */
     private learnTimer;
+    /** 状态持久化：退出/定时把上下文与待归纳桶写到 data/qqgm-ai-state.json */
+    private persistEnabled;
+    private persistTimer;
     constructor(host: AiHost, deps?: AiDeps);
+    /** 持久化文件路径（Koishi 数据目录下） */
+    private stateFilePath;
+    /** 精简一条记录用于落盘：去掉图片（Data URL 太大），文本做上限 */
+    private slimRecord;
+    private reviveRecord;
+    /**
+     * 恢复上次退出时的状态。
+     *
+     * - 最近上下文：只恢复 6 小时以内的，避免重启后把很久以前的消息当成“最近”；
+     * - 未归纳消息桶：全部恢复（它们还没变成记忆，丢了就真丢了）；
+     * - 计数、模型调用冷却、伪随机加成、点名跟随：一并恢复。
+     */
+    private restorePersistedState;
+    /** 落盘当前状态（同步、原子替换，dispose 时调用） */
+    private flushPersistedState;
+    private snapshotState;
+    /** 防抖落盘：状态变化频繁，最多 3 秒写一次 */
+    private schedulePersist;
     private groupKey;
     private ruleFor;
     /**
@@ -116,7 +137,7 @@ export declare class AiEngine {
     /** 归纳并（可选）回推到原会话 */
     /** 启动空闲兜底定时器；每 5 分钟检查一次 */
     private startLearnTimer;
-    /** 资源清理：停止定时器、清空缓存 */
+    /** 资源清理：落盘状态、停止定时器、清空缓存 */
     dispose(): void;
     private learnAndReport;
     /** 把一批消息归纳成一条记忆并写入对应作用域；返回写入结果或 null */

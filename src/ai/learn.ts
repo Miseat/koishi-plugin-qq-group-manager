@@ -82,6 +82,22 @@ export class LearnStore {
     return out;
   }
 
+  /** 持久化用：遍历所有待归纳桶 */
+  entries(): Array<{ kind: string; scopeId: string; bucket: LearnBucket }> {
+    const out: Array<{ kind: string; scopeId: string; bucket: LearnBucket }> = [];
+    for (const [k, bucket] of this.map) {
+      if (!bucket.size) continue;
+      const idx = k.indexOf(':');
+      out.push({ kind: k.slice(0, idx), scopeId: k.slice(idx + 1), bucket });
+    }
+    return out;
+  }
+
+  /** 持久化用：恢复一个待归纳桶 */
+  set(kind: string, scopeId: string, bucket: LearnBucket): void {
+    this.map.set(this.key(kind, scopeId), bucket);
+  }
+
   clear(): void {
     this.map.clear();
   }

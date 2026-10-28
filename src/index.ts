@@ -151,6 +151,7 @@ export const Config = Schema.intersect([
         aiPseudoRandomStep: Schema.number().min(0).max(1).step(0.001).default(0.01).description('伪随机每次未命中增加的概率（默认 0.01 = 1%）。只在真正掷骰且未命中时累加，冷却/阈值跳过不算。'),
         aiMinReplyIntervalSeconds: Schema.natural().default(45).description('同一群两次真正调用模型的最短间隔（秒）。'),
         aiContextWindow: Schema.natural().default(30).description('参与推理的最近消息条数（建议 20~40；太小会导致模型看不到前文）。'),
+        persistAiState: Schema.boolean().default(true).description('重启插件后恢复最近上下文、未归纳的消息桶、计数与冷却（保存到 data/qqgm-ai-state.json，只存文本、不存图片）。关闭则每次重启都从头开始。'),
         aiContextMaxChars: Schema.natural().min(0).max(20000).default(0).description('历史上下文的字数上限：超过后从最旧的消息开始丢（至少保留最近 4 条）。0 = 不限。想省 token 可设 2500~3500。'),
         aiStyleMaxChars: Schema.natural().min(0).max(20000).default(0).description('外部插件注入的「说话风格」段每条最多保留多少字。0 = 不限。风格 skill 很长时可设 1200~1800 显著省 token。'),
         aiTemperature: Schema.number().min(0).max(2).step(0.1).default(0.8).description('生成温度（0~2）。群聊接话建议 0.7~0.9，过高会跑题、复述、发散。'),
