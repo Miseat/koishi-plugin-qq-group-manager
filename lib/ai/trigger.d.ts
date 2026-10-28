@@ -1,11 +1,12 @@
 /**
  * 触发放行判定（纯函数，便于单测）。
  *
- * 三道闸门保留，但语义收紧：
- *   1) 冷却：同一群两次"真正调用模型"之间至少间隔 aiMinReplyIntervalSeconds；
- *   2) 阈值：hybrid/threshold 下需累计够 aiMessageThreshold 条消息；
- *   3) 概率：random/hybrid 下每条消息掷一次骰。
- * 点名与"点名后跟随"直接放行（不占冷却）。
+ * 冷却的语义已经统一：**所有真正调用模型的行为**（含 @、点名后跟随）
+ * 都受同一个冷却约束，按「上一次调用模型的时刻」计算，而不是按
+ * 「上一次成功发出回复」——模型返回 <pass/>、被过滤器拦下、请求失败
+ * 都算用过一次，避免一直失败却一直重试。
+ *
+ * 被 @ 但仍在冷却里时返回 remainingMs，由引擎决定是否在群里提示还剩多久。
  */
 export interface TriggerInput {
     mode: 'threshold' | 'random' | 'hybrid';
@@ -15,10 +16,9 @@ export interface TriggerInput {
     now: number;
     lastAttemptAt: number;
     minIntervalMs: number;
-    /** 上一次真正发出回复的时间（用于 @ 冷却） */
-    lastReplyAt: number;
-    /** 被 @ 后两次回复的最小间隔 */
-    mentionCooldownMs: number;
+    /** 兼容字段：旧版按“上次回复”计算的 @ 冷却，已合并进 minIntervalMs */
+    lastReplyAt?: number;
+    mentionCooldownMs?: number;
     inFlight: boolean;
     mention: boolean;
     followup: boolean;
@@ -28,5 +28,7 @@ export interface TriggerDecision {
     fire: boolean;
     forced: boolean;
     reason: string;
+    /** 冷却中时距离可以再次调用模型的剩余毫秒数 */
+    remainingMs?: number;
 }
 export declare function decideTrigger(input: TriggerInput): TriggerDecision;

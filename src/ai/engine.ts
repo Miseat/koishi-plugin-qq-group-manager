@@ -13,7 +13,16 @@
  */
 
 import { AiState, GroupState, ChatRecord, FollowupState } from './state';
-import { LearnBucket, LearnStore, buildSummaryPrompt, cleanSummary, isDuplicate } from './learn';
+import {
+  LearnBucket,
+  LearnStore,
+  buildSummaryPrompt,
+  buildConsolidatePrompt,
+  cleanSummary,
+  isDuplicate,
+  isAutoMemoryBlock,
+  AUTO_MEMORY_LABEL,
+} from './learn';
 import { decideTrigger } from './trigger';
 import { buildJudgePrompt, buildReplyPrompt, buildUserPrompt, PASS_TOKEN } from './prompt';
 import { ChatProvider, ChatResult } from './provider';
@@ -38,6 +47,14 @@ export interface AiHost {
   fetchQuotedImages?(session: any, quote: any): Promise<RenderedImage[]>;
   resolveImage(ref: string, session: any): Promise<string>;
   sendReply(session: any, text: string): Promise<void>;
+  /** 发送系统提示（不引用、不进入 AI 上下文），用于冷却提示等 */
+  sendNotice?(session: any, text: string): Promise<void>;
+  /** 写入自动归纳记忆：add = 新条目；remove = 需要被压缩替换掉的旧条目 */
+  commitAutoMemory?(scope: { kind: 'group' | 'private'; id: string } | null, payload: {
+    add: string;
+    remove?: string[];
+    label?: string;
+  }): Promise<void>;
   readMemoryFile(scope?: { kind: 'group' | 'private'; id: string } | null): Promise<string>;
 }
 
@@ -72,8 +89,22 @@ function cleanReply(text: string, selfName: string): string {
   return out.replace(/\s+/g, ' ').trim();
 }
 
-function clipReply(text: string, maxChars: number): string {
-  const max = Math.max(20, maxChars || 120);
+/** 把服务端 usage 压成一行日志，便于观察真实 token 消耗与缓存命中 */
+function usageText(usage: any): string {
+  if (!usage) return '';
+  const input = usage.prompt_tokens ?? usage.input_tokens;
+  const output = usage.completion_tokens ?? usage.output_tokens;
+  const cacheHit = usage.prompt_cache_hit_tokens
+    ?? usage.cached_tokens
+    ?? usage.cache_read_input_tokens;
+  const parts: string[] = [];
+  if (input != null) parts.push(`in=${input}`);
+  if (output != null) parts.push(`out=${output}`);
+  if (cacheHit != null) parts.push(`cache=${cacheHit}`);
+  return parts.join(',');
+}
+
+function clipReply(text: string, maxChars: number): string {  const max = Math.max(20, maxChars || 120);
   if (text.length <= max) return text;
   const slice = text.slice(0, max);
   const boundary = Math.max(
@@ -143,6 +174,17 @@ export class AiEngine {
     return rules.find((item) => String(item?.guildId ?? '').trim() === guildId);
   }
 
+  /**
+   * 读配置：该群 groupRules 里有同名非空值就用它，否则回落到全局。
+   * 这样频率限制（阈值/概率/模型调用冷却）可以按群单独设置。
+   */
+  private setting(session: any, key: string): any {
+    const rule = this.ruleFor(session);
+    const value = rule ? rule[key] : undefined;
+    if (value === undefined || value === null || value === '') return this.config[key];
+    return value;
+  }
+
   resolveEnabled(session: any): boolean {
     const rule = this.ruleFor(session);
     const requireRule = this.config.aiReplyRequireGroupRule !== false;
@@ -180,6 +222,38 @@ export class AiEngine {
 
   private get debugPrompt(): boolean {
     return !!this.config.aiDebugPrompt;
+  }
+
+  /**
+   * 历史上下文按字数裁剪（aiContextMaxChars，0=不限）。
+   * 从最新往前累加，至少保留最近 4 条，避免一刀切掉当前对话。
+   */
+  private clampContext(records: ChatRecord[]): ChatRecord[] {
+    const limit = Math.max(0, Number(this.config.aiContextMaxChars ?? 0));
+    if (!limit || !records.length) return records;
+    const out: ChatRecord[] = [];
+    let total = 0;
+    for (let i = records.length - 1; i >= 0; i -= 1) {
+      const item = records[i];
+      const size = String(item.text || '').length
+        + String(item.forwardText || '').length
+        + 32; // 昵称 / 时间 / 角色等渲染开销
+      if (out.length >= 4 && total + size > limit) break;
+      total += size;
+      out.unshift(item);
+    }
+    return out;
+  }
+
+  /** 限制外部插件注入的风格段长度（aiStyleMaxChars，0=不限） */
+  private clampStyle(sections: string[]): string[] {
+    const limit = Math.max(0, Number(this.config.aiStyleMaxChars ?? 0));
+    if (!limit || !sections.length) return sections;
+    return sections.map((text) => {
+      const value = String(text || '');
+      if (value.length <= limit) return value;
+      return `${value.slice(0, limit)}\n（以上风格说明过长已截断，保持已经给出的语气即可）`;
+    });
   }
 
   // ---------------------------------------------------------------- 记录
@@ -399,12 +473,12 @@ export class AiEngine {
     if (!records.length) return;
 
     const scope = { kind, id: scopeId } as any;
-    const summary = await this.summarizeRecords(records, kind, scope, reason);
-    if (!summary) return;
+    const saved = await this.summarizeRecords(records, kind, scope, reason);
+    if (!saved || !saved.text) return;
 
     if (cfg.memoryLearnPushBack === false) return;
 
-    const text = `刚记住了：${summary}`;
+    const text = saved.consolidated ? `刚整理了记忆：${saved.text}` : `刚记住了：${saved.text}`;
     try {
       if (kind === "private") {
         const bot = (kind === "private" && session?.bot) || null;
@@ -419,13 +493,13 @@ export class AiEngine {
     }
   }
 
-  /** 把一批消息归纳成一条记忆并写入对应作用域；返回归纳文本或空 */
+  /** 把一批消息归纳成一条记忆并写入对应作用域；返回写入结果或 null */
   private async summarizeRecords(
     records: any[],
     kind: "group" | "private",
     scope: any,
     reason: string,
-  ): Promise<string> {
+  ): Promise<{ text: string; consolidated: boolean; removed: number } | null> {
     const cfg: any = this.config || {};
 
     // 每日上限
@@ -436,7 +510,7 @@ export class AiEngine {
     const used = this.learnDaily.get(dailyKey) || 0;
     if (used >= limit) {
       this.host.logger?.info?.(`[memory-learn] 已达每日上限 ${limit}（${kind}:${scope.id}）`);
-      return "";
+      return null;
     }
 
     const prompt = buildSummaryPrompt(records, { kind, selfName: this.selfName });
@@ -447,20 +521,24 @@ export class AiEngine {
         user: prompt.user,
         temperature: 0.3,
         maxTokens: 400,
+        model: String(cfg.memoryLearnModel || "").trim() || undefined,
       });
       if (!result || !result.ok) {
         this.host.logger?.warn?.(`[memory-learn] 归纳调用失败: ${result && result.error}`);
-        return "";
+        return null;
       }
       raw = String(result.text || "");
+      if (usageText(result.usage)) {
+        this.host.logger?.info?.(`[memory-learn] 归纳 token ${usageText(result.usage)}（${kind}:${scope.id}）`);
+      }
     } catch (error: any) {
       this.host.logger?.warn?.(`[memory-learn] 归纳异常: ${String(error)}`);
-      return "";
+      return null;
     }
 
     const maxChars = Math.max(40, Number(cfg.memoryLearnMaxChars) || 150);
     let text = cleanSummary(raw, maxChars);
-    if (!text) return "";
+    if (!text) return null;
 
     // 去重
     let existing: string[] = [];
@@ -477,19 +555,114 @@ export class AiEngine {
     const threshold = Number(cfg.memoryLearnDuplicateThreshold) || 0.55;
     if (isDuplicate(text, existing, threshold)) {
       this.host.logger?.info?.(`[memory-learn] 跳过重复记忆（${kind}:${scope.id}）`);
-      return "";
+      return null;
     }
 
+    let saved: { text: string; consolidated: boolean; removed: number };
     try {
-      await (this.host as any).saveMemoryToFile("", text, scope, "自动归纳");
+      saved = await this.saveLearnedMemory(kind, scope, text);
       this.learnDaily.set(dailyKey, used + 1);
     } catch (error: any) {
       this.host.logger?.warn?.(`[memory-learn] 写入失败: ${String(error)}`);
-      return "";
+      return null;
     }
 
-    this.host.logger?.info?.(`[memory-learn] 已记入 ${kind}:${scope.id}（${reason}） ${text.length}字`);
-    return text;
+    this.host.logger?.info?.(
+      `[memory-learn] 已记入 ${kind}:${scope.id}（${reason}） ${saved.text.length}字`
+      + (saved.consolidated ? `，压缩 ${saved.removed} 条旧记忆 → 1` : ""),
+    );
+    return saved;
+  }
+
+  /**
+   * 自动归纳写入策略（1.4.7+）：
+   *   - 每累计 N 条（默认 5）就把最早的 N-1 条 + 本次新记忆压缩成 1 条；
+   *   - 自动记忆总数超过上限（默认 15）时同样触发压缩；
+   *   - 压缩失败时退回普通追加，不丢数据，下次归纳会再试。
+   */
+  private async saveLearnedMemory(
+    kind: "group" | "private",
+    scope: any,
+    text: string,
+  ): Promise<{ text: string; consolidated: boolean; removed: number }> {
+    const cfg: any = this.config || {};
+    const host: any = this.host;
+    const canConsolidate = cfg.memoryLearnConsolidate !== false
+      && typeof host.commitAutoMemory === "function";
+
+    if (!canConsolidate) {
+      await host.saveMemoryToFile("", text, scope, AUTO_MEMORY_LABEL);
+      return { text, consolidated: false, removed: 0 };
+    }
+
+    const every = Math.max(2, Number(cfg.memoryLearnConsolidateEvery) || 5);
+    const maxEntries = Math.max(1, Number(cfg.memoryLearnMaxEntries) || 15);
+    const maxChars = Math.max(40, Number(cfg.memoryLearnConsolidateMaxChars) || 90);
+
+    let autoBlocks: string[] = [];
+    try {
+      const content = await host.readMemoryFile(scope);
+      autoBlocks = splitMemoryBlocks(content)
+        .map((item) => item.text)
+        .filter((item) => isAutoMemoryBlock(item));
+    } catch {
+      autoBlocks = [];
+    }
+
+    const projected = autoBlocks.length + 1;
+    const reachedBatch = projected >= every;
+    const reachedCap = projected > maxEntries && autoBlocks.length > 0;
+    if (!reachedBatch && !reachedCap) {
+      await host.commitAutoMemory(scope, { add: text, label: AUTO_MEMORY_LABEL });
+      return { text, consolidated: false, removed: 0 };
+    }
+
+    // 常规：拿最早的 every-1 条 + 本次，正好 every 条压成 1 条
+    const take = Math.max(1, Math.min(every - 1, autoBlocks.length));
+    const remove = autoBlocks.slice(0, take);
+
+    let stored = text;
+    let consolidated = false;
+    try {
+      const merged = await this.consolidateMemories(kind, remove, text, maxChars);
+      if (merged) {
+        stored = merged;
+        consolidated = true;
+      }
+    } catch (error: any) {
+      this.host.logger?.warn?.(`[memory-learn] 压缩异常: ${String(error)}`);
+    }
+
+    await host.commitAutoMemory(scope, {
+      add: stored,
+      remove: consolidated ? remove : [],
+      label: AUTO_MEMORY_LABEL,
+    });
+    return { text: stored, consolidated, removed: consolidated ? remove.length : 0 };
+  }
+
+  /** 调模型把若干条自动记忆压成一条更短的 */
+  private async consolidateMemories(
+    kind: "group" | "private",
+    blocks: string[],
+    fresh: string,
+    maxChars: number,
+  ): Promise<string> {
+    const cfg: any = this.config || {};
+    const marker = `## · ${AUTO_MEMORY_LABEL}`;
+    const prompt = buildConsolidatePrompt([...blocks, `${marker}\n${fresh}`], { maxChars, kind });
+    const result = await this.provider.chat({
+      system: prompt.system,
+      user: prompt.user,
+      temperature: 0.2,
+      maxTokens: Math.max(200, Math.min(500, maxChars * 5)),
+      model: String(cfg.memoryLearnModel || "").trim() || undefined,
+    });
+    if (!result || !result.ok) {
+      this.host.logger?.warn?.(`[memory-learn] 压缩调用失败: ${result?.error || "unknown"}`);
+      return "";
+    }
+    return cleanSummary(String(result.text || ""), maxChars);
   }
 
   private findBot(): any {
@@ -608,6 +781,38 @@ export class AiEngine {
 
   // ---------------------------------------------------------------- 主流程
 
+  /**
+   * 被 @ 但处于模型调用冷却时，在群里提示还剩多久。
+   *
+   * 只发本地短句，不调用模型；同一群按 aiCooldownNoticeIntervalSeconds 限流，
+   * 避免有人连续 @ 时刷屏。
+   */
+  private async sendCooldownNotice(session: any, state: GroupState, remainingMs: number): Promise<void> {
+    if (this.setting(session, 'aiCooldownNotice') === false) return;
+    const gap = Math.max(0, Number(this.config.aiCooldownNoticeIntervalSeconds ?? 20)) * 1000;
+    const now = this.now();
+    if (gap > 0 && now - (state.lastCooldownNoticeAt || 0) < gap) return;
+
+    const seconds = Math.max(1, Math.ceil(Math.max(0, remainingMs) / 1000));
+    const template = String(this.config.aiCooldownNoticeText || '还在冷却，{seconds} 秒后再叫我。');
+    const text = template
+      .replace(/\{seconds\}/g, String(seconds))
+      .replace(/\{minutes\}/g, String(Math.ceil(seconds / 60)));
+    if (!text.trim()) return;
+
+    state.lastCooldownNoticeAt = now;
+    try {
+      if (typeof (this.host as any).sendNotice === 'function') {
+        await (this.host as any).sendNotice(session, text);
+      } else {
+        await this.host.sendReply(session, text);
+      }
+      this.log('ai-cooldown-notice', { seconds, remainingMs }, session);
+    } catch (error: any) {
+      this.host.logger?.warn?.(`[ai] 冷却提示发送失败: ${String(error)}`);
+    }
+  }
+
   async handle(session: any): Promise<void> {
     const key = this.groupKey(session);
     if (!key) return;
@@ -631,15 +836,15 @@ export class AiEngine {
     // 用户换了话题/说的和上一轮无关时，丢掉待续话题，避免机器人追着自己上一句说
     if (followupState && !followup) state.followup = null;
 
-    const threshold = Math.max(1, Number(this.config.aiMessageThreshold ?? 15));
+    const threshold = Math.max(1, Number(this.setting(session, 'aiMessageThreshold') ?? 15));
     const decision = decideTrigger({
-      mode: (this.config.aiReplyMode || 'hybrid') as any,
+      mode: (this.setting(session, 'aiReplyMode') || 'hybrid') as any,
       counter: state.counter,
       threshold,
-      probability: Number(this.config.aiRandomReplyProbability ?? 0.08),
+      probability: Number(this.setting(session, 'aiRandomReplyProbability') ?? 0.08),
       now: this.now(),
       lastAttemptAt: state.lastAttemptAt,
-      minIntervalMs: Math.max(0, Number(this.config.aiMinReplyIntervalSeconds ?? 45)) * 1000,
+      minIntervalMs: Math.max(0, Number(this.setting(session, 'aiMinReplyIntervalSeconds') ?? 45)) * 1000,
       lastReplyAt: state.lastReplyAt || 0,
       mentionCooldownMs: Math.max(0, Number(this.config.aiMentionCooldownSeconds ?? 5)) * 1000,
       inFlight: state.inFlight,
@@ -657,7 +862,12 @@ export class AiEngine {
       followup,
       ctx: state.records.length,
     }, session);
-    if (!decision.fire) return;
+    if (!decision.fire) {
+      if (decision.reason === 'cooldown-mention') {
+        await this.sendCooldownNotice(session, state, decision.remainingMs || 0);
+      }
+      return;
+    }
 
     state.inFlight = true;
     state.lastAttemptAt = this.now();
@@ -671,13 +881,13 @@ export class AiEngine {
         groupId: String(session.guildId),
         mode: 'reply',
       };
-      const styleSections = await this.hooks.collectSections(hookCtx);
+      const styleSections = this.clampStyle(await this.hooks.collectSections(hookCtx));
       const webSearch = await this.webSearch(record, session);
       const promptInput = {
         selfName: this.selfName,
         persona: this.personaPrompt,
         groupId: String(session.guildId),
-        records: state.records,
+        records: this.clampContext(state.records),
         current: record,
         mention,
         followup,
@@ -790,6 +1000,7 @@ export class AiEngine {
         images: images.length,
         degradedToText: !!result.degradedToText,
         chars: finalText.length,
+        tokens: usageText(result.usage) || undefined,
         preview: finalText.slice(0, 60),
       }, session);
 
@@ -815,7 +1026,7 @@ export class AiEngine {
     const session = { guildId: groupId, isDirect: false, platform: 'onebot' };
     let sections: string[] = [];
     try {
-      sections = await this.hooks.collectSections({ session, groupId, mode: 'reply' });
+      sections = this.clampStyle(await this.hooks.collectSections({ session, groupId, mode: 'reply' }));
     } catch { /* ignore */ }
     const system = [
       `你是 QQ 群 ${groupId} 里的一个普通成员。`,

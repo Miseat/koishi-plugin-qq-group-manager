@@ -226,6 +226,11 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
         kind: "group" | "private";
         id: string;
     } | null, label?: string): Promise<any>;
+    /**
+     * 自动归纳专用写入：追加一条新记忆，并可同时删掉若干旧条目。
+     * 用于「每 N 条压缩成 1 条」——remove 里的旧条目会被新条目替换。
+     */
+    commitAutoMemory(scope: any, payload: any): Promise<any>;
     searchMemory(keyword: any, limit: number, scope: any): Promise<string[]>;
     /** 按关键词删除记忆条目（含该关键词的整条记忆块）。返回 { ok, removed, message } */
     deleteMemoryByKeyword(keyword: any, scope: any): Promise<any>;
@@ -352,6 +357,8 @@ export class QQGroupManagerService extends koishi_1.Service<any, koishi_1.Contex
     resolveImage(ref: any, session: any): Promise<any>;
     /** AI 回复发送：按 aiQuoteReplyMode 决定是否引用触发消息，失败则退化为纯文本 */
     sendReply(session: any, text: any): Promise<void>;
+    /** 系统提示（例如「冷却中」），不引用原消息、不写入 AI 上下文 */
+    sendNotice(session: any, text: any): Promise<void>;
     extractTextForFilter(session: any): any;
     hasTextContent(session: any): boolean;
     hasImageOrFace(session: any): any;

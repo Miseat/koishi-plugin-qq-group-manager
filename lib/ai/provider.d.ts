@@ -13,6 +13,8 @@ export interface ChatRequest {
     temperature?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    /** 覆盖默认 aiModel（例如自动归纳用更便宜的模型） */
+    model?: string;
 }
 export interface ChatResult {
     ok: boolean;
@@ -21,6 +23,8 @@ export interface ChatResult {
     status?: number;
     /** 是否因为图片被拒而发生了降级重试 */
     degradedToText?: boolean;
+    /** 服务端 token 用量（OpenAI: usage；Gemini: usageMetadata） */
+    usage?: any;
 }
 export interface ProviderConfig {
     aiProvider?: string;

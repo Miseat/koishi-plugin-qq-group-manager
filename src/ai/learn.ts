@@ -206,3 +206,59 @@ export function isDuplicate(candidate: string, existing: string[], threshold = 0
   }
   return false;
 }
+
+// ---------------------------------------------------------------- 记忆压缩
+
+/** 自动归纳条目的标题标记（写进 Markdown 块首行） */
+export const AUTO_MEMORY_LABEL = '自动归纳';
+
+/** 自动归纳块首行形如 `## 2026/10/28 12:00:00 · 自动归纳` */
+export function isAutoMemoryBlock(block: string): boolean {
+  const first = String(block || '').split('\n', 1)[0] || '';
+  return /·\s*自动归纳/.test(first);
+}
+
+/** 取记忆块正文（去掉 `## 时间 · 来源` 标题行） */
+export function memoryBlockBody(block: string): string {
+  const lines = String(block || '').split('\n');
+  if (lines.length <= 1) return String(block || '').trim();
+  return lines.slice(1).join('\n').trim();
+}
+
+/**
+ * 记忆压缩提示词：把 N 条自动归纳合并成一条更短的。
+ *
+ * 目的不是“再总结一遍”，而是去掉重复与过时信息——群里连续几天聊同一件事时，
+ * 自动归纳会反复产出高度相似的条目，压缩后只保留事实差异。
+ */
+export function buildConsolidatePrompt(
+  blocks: string[],
+  options: { maxChars?: number; kind?: string } = {},
+): { system: string; user: string } {
+  const maxChars = Math.max(40, Number(options.maxChars) || 90);
+  const label = options.kind === 'private' ? '私聊' : '群聊';
+  const bodies = (blocks || [])
+    .map((block) => memoryBlockBody(block).replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  const system = [
+    `你在压缩一段${label}的长期记忆。`,
+    `下面有 ${bodies.length} 条已经归纳过的记忆，请合并成一条。`,
+    '',
+    '要求：',
+    '- 只保留互不重复的事实：人物与称呼、关系、稳定偏好、反复出现的话题；',
+    '- 删掉重复表述、一次性情绪、已经过时的细节；',
+    '- 不要编造，不要写“他们聊到”“讨论了”这类过程描述；',
+    `- 只输出一条纯文本，不超过 ${maxChars} 字，不要标题、编号、列表、Markdown；`,
+    '- 如果这些记忆里没有任何值得保留的内容，只输出一个词：NONE',
+  ].join('\n');
+
+  const user = [
+    '【待压缩的记忆】',
+    ...bodies.map((text, index) => `${index + 1}. ${text}`),
+    '',
+    '现在输出合并后的那一条记忆，或输出 NONE。',
+  ].join('\n');
+
+  return { system, user };
+}

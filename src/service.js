@@ -889,6 +889,42 @@ class QQGroupManagerService extends koishi_1.Service {
             return block;
         });
     }
+    /**
+     * 自动归纳专用写入：追加一条新记忆，并可同时删掉若干旧条目。
+     * 用于「每 N 条压缩成 1 条」——remove 里的旧条目会被新条目替换。
+     */
+    async commitAutoMemory(scope, payload) {
+        const add = String(payload && payload.add || '').trim();
+        if (!add)
+            return null;
+        const remove = new Set((payload && payload.remove || [])
+            .map((item) => String(item || '').trim())
+            .filter(Boolean));
+        const label = String(payload && payload.label || '自动归纳');
+        return this.runMemoryWriteLocked(async () => {
+            const now = new Date();
+            const stamp = now.toLocaleString('zh-CN', { hour12: false });
+            const block = `## ${stamp} · ${label}\n${add}`;
+            const existing = (await this.readMemoryFile(scope)).trim();
+            const blocks = this.extractMemoryBlocks(existing);
+            const kept = [];
+            let insertAt = -1;
+            for (const item of blocks) {
+                if (remove.has(item)) {
+                    if (insertAt < 0)
+                        insertAt = kept.length;
+                    continue;
+                }
+                kept.push(item);
+            }
+            if (insertAt < 0)
+                insertAt = kept.length;
+            kept.splice(insertAt, 0, block);
+            const next = kept.length ? `${kept.join('\n\n---\n\n')}\n` : `${block}\n`;
+            await this.writeMemoryFile(next, scope);
+            return block;
+        });
+    }
     async searchMemory(keyword, limit = 8, scope) {
         const blocks = this.extractMemoryBlocks(await this.readMemoryFile(scope));
         const kw = String(keyword || '').trim();
@@ -2173,6 +2209,12 @@ class QQGroupManagerService extends koishi_1.Service {
             }
         }
         await session.send(koishi_1.h.text(text));
+    }
+    /** 系统提示（例如「冷却中」），不引用原消息、不写入 AI 上下文 */
+    async sendNotice(session, text) {
+        if (!text)
+            return;
+        await session.send(koishi_1.h.text(String(text)));
     }
     extractTextForFilter(session) {
         const raw = (session.content ?? '')

@@ -24,6 +24,17 @@ export interface AiHost {
     fetchQuotedImages?(session: any, quote: any): Promise<RenderedImage[]>;
     resolveImage(ref: string, session: any): Promise<string>;
     sendReply(session: any, text: string): Promise<void>;
+    /** 发送系统提示（不引用、不进入 AI 上下文），用于冷却提示等 */
+    sendNotice?(session: any, text: string): Promise<void>;
+    /** 写入自动归纳记忆：add = 新条目；remove = 需要被压缩替换掉的旧条目 */
+    commitAutoMemory?(scope: {
+        kind: 'group' | 'private';
+        id: string;
+    } | null, payload: {
+        add: string;
+        remove?: string[];
+        label?: string;
+    }): Promise<void>;
     readMemoryFile(scope?: {
         kind: 'group' | 'private';
         id: string;
@@ -64,6 +75,11 @@ export declare class AiEngine {
     constructor(host: AiHost, deps?: AiDeps);
     private groupKey;
     private ruleFor;
+    /**
+     * 读配置：该群 groupRules 里有同名非空值就用它，否则回落到全局。
+     * 这样频率限制（阈值/概率/模型调用冷却）可以按群单独设置。
+     */
+    private setting;
     resolveEnabled(session: any): boolean;
     private get contextWindow();
     private get selfName();
@@ -71,6 +87,13 @@ export declare class AiEngine {
     private get personaPrompt();
     private get maxReplyChars();
     private get debugPrompt();
+    /**
+     * 历史上下文按字数裁剪（aiContextMaxChars，0=不限）。
+     * 从最新往前累加，至少保留最近 4 条，避免一刀切掉当前对话。
+     */
+    private clampContext;
+    /** 限制外部插件注入的风格段长度（aiStyleMaxChars，0=不限） */
+    private clampStyle;
     /** 是否像指令（这类消息不进上下文，避免污染） */
     private isCommandLike;
     /** 记录一条群消息；返回落库后的记录（指令类返回 null） */
@@ -96,8 +119,17 @@ export declare class AiEngine {
     /** 资源清理：停止定时器、清空缓存 */
     dispose(): void;
     private learnAndReport;
-    /** 把一批消息归纳成一条记忆并写入对应作用域；返回归纳文本或空 */
+    /** 把一批消息归纳成一条记忆并写入对应作用域；返回写入结果或 null */
     private summarizeRecords;
+    /**
+     * 自动归纳写入策略（1.4.7+）：
+     *   - 每累计 N 条（默认 5）就把最早的 N-1 条 + 本次新记忆压缩成 1 条；
+     *   - 自动记忆总数超过上限（默认 15）时同样触发压缩；
+     *   - 压缩失败时退回普通追加，不丢数据，下次归纳会再试。
+     */
+    private saveLearnedMemory;
+    /** 调模型把若干条自动记忆压成一条更短的 */
+    private consolidateMemories;
     private findBot;
     private isMention;
     private addressesOthers;
@@ -106,6 +138,13 @@ export declare class AiEngine {
     private bumpFollowup;
     private getFollowup;
     private loadMemories;
+    /**
+     * 被 @ 但处于模型调用冷却时，在群里提示还剩多久。
+     *
+     * 只发本地短句，不调用模型；同一群按 aiCooldownNoticeIntervalSeconds 限流，
+     * 避免有人连续 @ 时刷屏。
+     */
+    private sendCooldownNotice;
     handle(session: any): Promise<void>;
     /** 供外部插件（如私聊插件）复用同一个模型 provider。 */
     chat(request: any): Promise<ChatResult>;

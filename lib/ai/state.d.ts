@@ -39,6 +39,8 @@ export declare class GroupState {
     counter: number;
     lastReplyAt: number;
     lastAttemptAt: number;
+    /** 上次发「冷却中」提示的时间，用于避免 @ 刷屏时反复提示 */
+    lastCooldownNoticeAt: number;
     inFlight: boolean;
     followup: FollowupState | null;
     seen: Map<string, number>;

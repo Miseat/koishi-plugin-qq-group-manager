@@ -43,6 +43,8 @@ export class GroupState {
   counter = 0;
   lastReplyAt = 0;
   lastAttemptAt = 0;
+  /** 上次发「冷却中」提示的时间，用于避免 @ 刷屏时反复提示 */
+  lastCooldownNoticeAt = 0;
   inFlight = false;
   followup: FollowupState | null = null;
   seen = new Map<string, number>();

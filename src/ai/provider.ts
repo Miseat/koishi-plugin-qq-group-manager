@@ -14,6 +14,8 @@ export interface ChatRequest {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  /** 覆盖默认 aiModel（例如自动归纳用更便宜的模型） */
+  model?: string;
 }
 
 export interface ChatResult {
@@ -23,6 +25,8 @@ export interface ChatResult {
   status?: number;
   /** 是否因为图片被拒而发生了降级重试 */
   degradedToText?: boolean;
+  /** 服务端 token 用量（OpenAI: usage；Gemini: usageMetadata） */
+  usage?: any;
 }
 
 export interface ProviderConfig {
@@ -65,7 +69,7 @@ export class ChatProvider {
 
   async chat(request: ChatRequest): Promise<ChatResult> {
     if (!this.apiKey) return { ok: false, error: 'AI 未配置 apiKey' };
-    if (!this.model) return { ok: false, error: 'AI 未配置 model' };
+    if (!this.model && !String(request.model || '').trim()) return { ok: false, error: 'AI 未配置 model' };
 
     const provider = String(this.config.aiProvider ?? 'openai-compatible');
     const requested = (request.images ?? []).filter((item) => /^data:image\//i.test(item) || /^https?:\/\//i.test(item));
@@ -113,6 +117,7 @@ export class ChatProvider {
     options: { maxTokens?: number; retried?: boolean } = {},
   ): Promise<ChatResult> {
     const base = String(this.config.aiBaseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+    const model = String(request.model || this.model).trim();
     const content: any[] = [{ type: 'text', text: request.user }];
     for (const url of images) content.push({ type: 'image_url', image_url: { url } });
     const userContent = images.length ? content : request.user;
@@ -131,7 +136,7 @@ export class ChatProvider {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: this.model,
+          model,
           temperature: request.temperature ?? this.config.aiTemperature ?? 0.8,
           max_tokens: maxTokens,
           messages: [
@@ -180,7 +185,7 @@ export class ChatProvider {
           error: `模型返回空内容(finish=${payload?.choices?.[0]?.finish_reason || 'unknown'})`,
         };
       }
-      return { ok: true, text, status: response.status };
+      return { ok: true, text, status: response.status, usage: payload?.usage };
     } catch (error: any) {
       const aborted = error?.name === 'AbortError';
       return { ok: false, error: aborted ? '请求超时' : `请求失败: ${String(error?.message || error)}` };
@@ -192,7 +197,8 @@ export class ChatProvider {
   private async callGemini(request: ChatRequest, images: string[]): Promise<ChatResult> {
     const rawBase = String(this.config.aiBaseUrl || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '');
     const base = /\/v\d/i.test(rawBase) ? rawBase : `${rawBase}/v1beta`;
-    const endpoint = `${base}/models/${encodeURIComponent(this.model)}:generateContent?key=${encodeURIComponent(this.apiKey)}`;
+    const model = String(request.model || this.model).trim();
+    const endpoint = `${base}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(this.apiKey)}`;
     const parts: any[] = [{ text: request.user }];
     for (const url of images) {
       const match = /^data:(image\/[^;]+);base64,(.*)$/i.exec(url);
@@ -228,7 +234,7 @@ export class ChatProvider {
         .join('')
         .trim();
       if (!text) return { ok: false, status: response.status, error: 'Gemini 返回空内容' };
-      return { ok: true, text, status: response.status };
+      return { ok: true, text, status: response.status, usage: payload?.usageMetadata };
     } catch (error: any) {
       const aborted = error?.name === 'AbortError';
       return { ok: false, error: aborted ? '请求超时' : `请求失败: ${String(error?.message || error)}` };

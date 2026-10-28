@@ -2,6 +2,53 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.4.7
+
+### 新功能
+
+- **自动记忆定期压缩**：每累计 5 条自动归纳（`memoryLearnConsolidateEvery`）就把
+  「最早的 4 条 + 本次新记忆」合并成 1 条更短的记忆，压缩结果替换这一批旧条目；
+  自动记忆总数默认上限 15 条（`memoryLearnMaxEntries`），超过后强制压缩。
+  手动 `[memory]` 保存的内容不受影响。相关配置：
+
+  - `memoryLearnConsolidate`：总开关（默认开）
+  - `memoryLearnConsolidateEvery`：每多少条压缩一次（默认 5）
+  - `memoryLearnMaxEntries`：自动记忆条数上限（默认 15）
+  - `memoryLearnConsolidateMaxChars`：压缩后单条字数上限（默认 90）
+  - `memoryLearnModel`：归纳/压缩专用模型，留空沿用 `aiModel`，可填更便宜的模型
+
+- **频率限制可按群单独配置**：`groupRules` 新增 `aiMessageThreshold`、
+  `aiRandomReplyProbability`、`aiMinReplyIntervalSeconds`、`aiCooldownNotice`，
+  留空则跟随全局，填 0 表示该群不限制。
+
+- **模型调用冷却真正生效**：之前 @ 与「点名后跟随」会直接绕过冷却，且冷却按
+  「上次成功发出回复」计算，模型返回 `<pass/>`、被过滤器拦下或请求失败时不会更新，
+  所以看起来像坏的。现在：
+
+  - 所有会调用模型的行为（含 @）统一受 `aiMinReplyIntervalSeconds` 约束；
+  - 冷却按「上一次调用模型」计算，失败与放弃也算用掉一次；
+  - 冷却结束后自动恢复，不需要重载插件。
+
+- **冷却中被 @ 会提示还剩多久**：`aiCooldownNotice`（默认开）、
+  `aiCooldownNoticeText`（支持 `{seconds}` / `{minutes}`）、
+  `aiCooldownNoticeIntervalSeconds`（同一群默认 20 秒内不重复提示）。
+  提示是纯本地消息，**不调用模型、不消耗 token**，也不会写进 AI 上下文。
+
+### 改进
+
+- 模型调用日志新增 token 用量：`tokens=in=…,out=…,cache=…`。
+  其中 `cache` 是上下文缓存命中的 token 数，可以直接判断提示词前缀有没有被缓存。
+- 新增 `aiContextMaxChars`：历史上下文按字数裁剪（从最旧开始丢，至少保留最近 4 条），
+  默认 0 = 不限；想省 token 可设 2500~3500。
+- 新增 `aiStyleMaxChars`：限制外部插件注入的「说话风格」段长度，默认 0 = 不限；
+  风格 skill 很长时可设 1200~1800，能显著降低每次调用的输入 token。
+- 自动归纳/压缩的模型调用也会记录 token 用量。
+
+### 测试
+
+- 新增 12 项测试：冷却顺序与剩余时间、按群覆盖阈值/冷却、冷却提示限流、
+  记忆压缩（5→1、超上限强制压缩、失败回退、真实写盘替换、手动记忆保留）。
+
 ## 1.4.6
 
 ### 修复

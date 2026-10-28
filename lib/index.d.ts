@@ -25,6 +25,10 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     groupRules: Schema<Schemastery.ObjectS<{
         guildId: Schema<string, string>;
         enableAiReply: Schema<boolean, boolean>;
+        aiMessageThreshold: Schema<number, number>;
+        aiRandomReplyProbability: Schema<number, number>;
+        aiMinReplyIntervalSeconds: Schema<number, number>;
+        aiCooldownNotice: Schema<boolean, boolean>;
         bannedWords: Schema<string[], string[]>;
         whitelistKeywords: Schema<string[], string[]>;
         strongKeywords: Schema<string[], string[]>;
@@ -44,6 +48,10 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     }>[], Schemastery.ObjectT<{
         guildId: Schema<string, string>;
         enableAiReply: Schema<boolean, boolean>;
+        aiMessageThreshold: Schema<number, number>;
+        aiRandomReplyProbability: Schema<number, number>;
+        aiMinReplyIntervalSeconds: Schema<number, number>;
+        aiCooldownNotice: Schema<boolean, boolean>;
         bannedWords: Schema<string[], string[]>;
         whitelistKeywords: Schema<string[], string[]>;
         strongKeywords: Schema<string[], string[]>;
@@ -81,6 +89,11 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     memoryLearnPushBack: Schema<boolean, boolean>;
     memoryLearnDuplicateThreshold: Schema<number, number>;
     memoryLearnDailyLimit: Schema<number, number>;
+    memoryLearnConsolidate: Schema<boolean, boolean>;
+    memoryLearnConsolidateEvery: Schema<number, number>;
+    memoryLearnMaxEntries: Schema<number, number>;
+    memoryLearnConsolidateMaxChars: Schema<number, number>;
+    memoryLearnModel: Schema<string, string>;
 }> | Schemastery.ObjectS<{
     enableBlacklist: Schema<boolean, boolean>;
     blacklistFileName: Schema<string, string>;
@@ -131,6 +144,9 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiModel: Schema<string, string>;
     aiAgentName: Schema<string, string>;
     aiMentionCooldownSeconds: Schema<number, number>;
+    aiCooldownNotice: Schema<boolean, boolean>;
+    aiCooldownNoticeText: Schema<string, string>;
+    aiCooldownNoticeIntervalSeconds: Schema<number, number>;
     aiIdleTopicMinutes: Schema<number, number>;
     aiIdleTopicMinHour: Schema<number, number>;
     aiIdleTopicMaxHour: Schema<number, number>;
@@ -151,6 +167,8 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiRandomReplyProbability: Schema<number, number>;
     aiMinReplyIntervalSeconds: Schema<number, number>;
     aiContextWindow: Schema<number, number>;
+    aiContextMaxChars: Schema<number, number>;
+    aiStyleMaxChars: Schema<number, number>;
     aiTemperature: Schema<number, number>;
     aiMaxOutputTokens: Schema<number, number>;
     aiMaxReplyChars: Schema<number, number>;
@@ -217,6 +235,10 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     groupRules: Schemastery.ObjectT<{
         guildId: Schema<string, string>;
         enableAiReply: Schema<boolean, boolean>;
+        aiMessageThreshold: Schema<number, number>;
+        aiRandomReplyProbability: Schema<number, number>;
+        aiMinReplyIntervalSeconds: Schema<number, number>;
+        aiCooldownNotice: Schema<boolean, boolean>;
         bannedWords: Schema<string[], string[]>;
         whitelistKeywords: Schema<string[], string[]>;
         strongKeywords: Schema<string[], string[]>;
@@ -254,6 +276,11 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     memoryLearnPushBack: boolean;
     memoryLearnDuplicateThreshold: number;
     memoryLearnDailyLimit: number;
+    memoryLearnConsolidate: boolean;
+    memoryLearnConsolidateEvery: number;
+    memoryLearnMaxEntries: number;
+    memoryLearnConsolidateMaxChars: number;
+    memoryLearnModel: string;
 } & {
     enableBlacklist: boolean;
     blacklistFileName: string;
@@ -295,6 +322,9 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiModel: string;
     aiAgentName: string;
     aiMentionCooldownSeconds: number;
+    aiCooldownNotice: boolean;
+    aiCooldownNoticeText: string;
+    aiCooldownNoticeIntervalSeconds: number;
     aiIdleTopicMinutes: number;
     aiIdleTopicMinHour: number;
     aiIdleTopicMaxHour: number;
@@ -311,6 +341,8 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiRandomReplyProbability: number;
     aiMinReplyIntervalSeconds: number;
     aiContextWindow: number;
+    aiContextMaxChars: number;
+    aiStyleMaxChars: number;
     aiTemperature: number;
     aiMaxOutputTokens: number;
     aiMaxReplyChars: number;

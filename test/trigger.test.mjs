@@ -29,31 +29,45 @@ test('达到阈值触发', () => {
   assert.equal(decideTrigger({ ...base, counter: 3 }).fire, true);
 });
 
-test('冷却期内不触发', () => {
+test('冷却期内不触发，并返回剩余时间', () => {
   const result = decideTrigger({ ...base, counter: 10, now: 1_010_000, lastAttemptAt: 1_000_000 });
   assert.equal(result.fire, false);
   assert.equal(result.reason, 'cooldown');
+  assert.equal(result.remainingMs, 20_000);
 });
 
-test('点名无视冷却与阈值', () => {
+test('点名越过阈值，但同样受模型调用冷却限制', () => {
   const result = decideTrigger({
-    ...base, counter: 0, now: 1_000, lastAttemptAt: 999_000, mention: true,
+    ...base, counter: 0, now: 1_000_000, lastAttemptAt: 0, mention: true,
   });
   assert.equal(result.fire, true);
   assert.equal(result.forced, true);
+  assert.equal(result.reason, 'direct-mention');
 });
 
-test('点名冷却内不触发', () => {
+test('点名冷却内不触发，返回 cooldown-mention 与剩余秒数', () => {
   const result = decideTrigger({
     ...base,
     counter: 0,
     now: 1_010_000,
-    lastReplyAt: 1_000_000,
-    mentionCooldownMs: 30_000,
+    lastAttemptAt: 1_000_000,
     mention: true,
   });
   assert.equal(result.fire, false);
-  assert.equal(result.reason, 'mention-cooldown');
+  assert.equal(result.reason, 'cooldown-mention');
+  assert.equal(result.remainingMs, 20_000);
+});
+
+test('点名后跟随同样受冷却限制', () => {
+  const result = decideTrigger({
+    ...base,
+    counter: 99,
+    now: 1_010_000,
+    lastAttemptAt: 1_000_000,
+    followup: true,
+  });
+  assert.equal(result.fire, false);
+  assert.equal(result.remainingMs, 20_000);
 });
 
 test('随机模式未掷中不触发', () => {

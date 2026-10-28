@@ -56,3 +56,22 @@ export declare function cleanSummary(raw: string, maxChars?: number): string;
 export declare function similarityOf(a: string, b: string): number;
 /** 判断是否与已有记忆重复 */
 export declare function isDuplicate(candidate: string, existing: string[], threshold?: number): boolean;
+/** 自动归纳条目的标题标记（写进 Markdown 块首行） */
+export declare const AUTO_MEMORY_LABEL = "\u81EA\u52A8\u5F52\u7EB3";
+/** 自动归纳块首行形如 `## 2026/10/28 12:00:00 · 自动归纳` */
+export declare function isAutoMemoryBlock(block: string): boolean;
+/** 取记忆块正文（去掉 `## 时间 · 来源` 标题行） */
+export declare function memoryBlockBody(block: string): string;
+/**
+ * 记忆压缩提示词：把 N 条自动归纳合并成一条更短的。
+ *
+ * 目的不是“再总结一遍”，而是去掉重复与过时信息——群里连续几天聊同一件事时，
+ * 自动归纳会反复产出高度相似的条目，压缩后只保留事实差异。
+ */
+export declare function buildConsolidatePrompt(blocks: string[], options?: {
+    maxChars?: number;
+    kind?: string;
+}): {
+    system: string;
+    user: string;
+};
