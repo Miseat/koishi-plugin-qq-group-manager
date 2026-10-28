@@ -102,3 +102,25 @@ test('HTTP 错误信息会带回来', async () => {
   assert.equal(result.status, 500);
   assert.match(result.error, /boom/);
 });
+
+test('透传 usage，并允许单次调用覆盖模型', async () => {
+  const bodies = [];
+  globalThis.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return response(200, {
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 120, completion_tokens: 8, prompt_cache_hit_tokens: 100 },
+    });
+  };
+
+  const provider = new ChatProvider(config(), { warn() {} });
+  const overridden = await provider.chat({ system: 's', user: 'u', model: 'cheap-model' });
+  assert.equal(overridden.ok, true);
+  assert.equal(overridden.usage.prompt_tokens, 120);
+  assert.equal(bodies[0].model, 'cheap-model');
+
+  const fallback = await provider.chat({ system: 's', user: 'u' });
+  assert.equal(bodies[1].model, 'test-model', '未指定时沿用 aiModel');
+  assert.equal(fallback.usage.prompt_cache_hit_tokens, 100);
+});
+
