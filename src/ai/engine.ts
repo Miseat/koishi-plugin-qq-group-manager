@@ -851,7 +851,12 @@ export class AiEngine {
       mention,
       followup,
       rng: this.rng,
+      pseudoRandom: this.setting(session, 'aiPseudoRandom') !== false,
+      randomBoost: state.randomBoost,
+      pseudoRandomStep: Math.max(0, Number(this.setting(session, 'aiPseudoRandomStep') ?? 0.01)),
     });
+    // 伪随机加成只由「随机掷骰」更新：冷却/阈值跳过时保持不变
+    if (typeof decision.nextBoost === 'number') state.randomBoost = decision.nextBoost;
 
     this.log('ai-trigger', {
       fire: decision.fire,
@@ -860,6 +865,8 @@ export class AiEngine {
       threshold,
       mention,
       followup,
+      prob: decision.effectiveProbability,
+      boost: state.randomBoost,
       ctx: state.records.length,
     }, session);
     if (!decision.fire) {

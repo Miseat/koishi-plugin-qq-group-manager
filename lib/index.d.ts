@@ -27,6 +27,8 @@ export declare const Config: Schema<Schemastery.ObjectS<{
         enableAiReply: Schema<boolean, boolean>;
         aiMessageThreshold: Schema<number, number>;
         aiRandomReplyProbability: Schema<number, number>;
+        aiPseudoRandom: Schema<boolean, boolean>;
+        aiPseudoRandomStep: Schema<number, number>;
         aiMinReplyIntervalSeconds: Schema<number, number>;
         aiCooldownNotice: Schema<boolean, boolean>;
         bannedWords: Schema<string[], string[]>;
@@ -50,6 +52,8 @@ export declare const Config: Schema<Schemastery.ObjectS<{
         enableAiReply: Schema<boolean, boolean>;
         aiMessageThreshold: Schema<number, number>;
         aiRandomReplyProbability: Schema<number, number>;
+        aiPseudoRandom: Schema<boolean, boolean>;
+        aiPseudoRandomStep: Schema<number, number>;
         aiMinReplyIntervalSeconds: Schema<number, number>;
         aiCooldownNotice: Schema<boolean, boolean>;
         bannedWords: Schema<string[], string[]>;
@@ -165,6 +169,8 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiReplyMode: Schema<"threshold" | "random" | "hybrid", "threshold" | "random" | "hybrid">;
     aiMessageThreshold: Schema<number, number>;
     aiRandomReplyProbability: Schema<number, number>;
+    aiPseudoRandom: Schema<boolean, boolean>;
+    aiPseudoRandomStep: Schema<number, number>;
     aiMinReplyIntervalSeconds: Schema<number, number>;
     aiContextWindow: Schema<number, number>;
     aiContextMaxChars: Schema<number, number>;
@@ -237,6 +243,8 @@ export declare const Config: Schema<Schemastery.ObjectS<{
         enableAiReply: Schema<boolean, boolean>;
         aiMessageThreshold: Schema<number, number>;
         aiRandomReplyProbability: Schema<number, number>;
+        aiPseudoRandom: Schema<boolean, boolean>;
+        aiPseudoRandomStep: Schema<number, number>;
         aiMinReplyIntervalSeconds: Schema<number, number>;
         aiCooldownNotice: Schema<boolean, boolean>;
         bannedWords: Schema<string[], string[]>;
@@ -339,6 +347,8 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiReplyMode: "threshold" | "random" | "hybrid";
     aiMessageThreshold: number;
     aiRandomReplyProbability: number;
+    aiPseudoRandom: boolean;
+    aiPseudoRandomStep: number;
     aiMinReplyIntervalSeconds: number;
     aiContextWindow: number;
     aiContextMaxChars: number;

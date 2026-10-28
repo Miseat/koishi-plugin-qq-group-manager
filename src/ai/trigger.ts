@@ -24,6 +24,12 @@ export interface TriggerInput {
   mention: boolean;
   followup: boolean;
   rng: () => number;
+  /** 伪随机：随机未命中时把下一次概率往上抬，直到必定触发 */
+  pseudoRandom?: boolean;
+  /** 当前已累计的概率加成（0~1） */
+  randomBoost?: number;
+  /** 每次未命中增加多少（默认 0.01） */
+  pseudoRandomStep?: number;
 }
 
 export interface TriggerDecision {
@@ -32,6 +38,10 @@ export interface TriggerDecision {
   reason: string;
   /** 冷却中时距离可以再次调用模型的剩余毫秒数 */
   remainingMs?: number;
+  /** 本次判定后应保存的伪随机加成；未发生随机掷骰时为 undefined（保持不变） */
+  nextBoost?: number;
+  /** 本次实际使用的概率（基础值 + 加成），用于日志排查 */
+  effectiveProbability?: number;
 }
 
 export function decideTrigger(input: TriggerInput): TriggerDecision {
@@ -66,14 +76,44 @@ export function decideTrigger(input: TriggerInput): TriggerDecision {
     };
   }
 
-  // ---------- 4) 概率 ----------
+  // ---------- 4) 概率（支持伪随机：连续未命中会逐步抬高概率） ----------
   const needRandom = input.mode === 'random' || input.mode === 'hybrid';
   if (needRandom) {
-    const probability = Math.max(0, Math.min(1, Number(input.probability) || 0));
-    if (probability <= 0) return { fire: false, forced: false, reason: 'random-disabled' };
-    if (input.rng() >= probability) {
-      return { fire: false, forced: false, reason: `random-miss(${probability})` };
+    const base = Math.max(0, Math.min(1, Number(input.probability) || 0));
+    const boost = Math.max(0, Number(input.randomBoost) || 0);
+    const effective = Math.min(1, base + boost);
+    const round4 = (value: number) => Math.round(value * 10000) / 10000;
+
+    if (effective <= 0) {
+      return {
+        fire: false,
+        forced: false,
+        reason: 'random-disabled',
+        nextBoost: round4(boost),
+        effectiveProbability: 0,
+      };
     }
+
+    // 加成到 1 时必定触发，不再消耗随机数
+    if (effective >= 1 || input.rng() < effective) {
+      return {
+        fire: true,
+        forced: false,
+        reason: `trigger(${input.mode})`,
+        nextBoost: 0,
+        effectiveProbability: round4(effective),
+      };
+    }
+
+    const step = Math.max(0, Number(input.pseudoRandomStep) || 0);
+    const nextBoost = input.pseudoRandom ? Math.min(1, round4(boost + step)) : round4(boost);
+    return {
+      fire: false,
+      forced: false,
+      reason: `random-miss(${effective.toFixed(2)})`,
+      nextBoost,
+      effectiveProbability: round4(effective),
+    };
   }
 
   return { fire: true, forced: false, reason: `trigger(${input.mode})` };

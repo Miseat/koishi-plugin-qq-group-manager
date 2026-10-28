@@ -45,6 +45,8 @@ export class GroupState {
   lastAttemptAt = 0;
   /** 上次发「冷却中」提示的时间，用于避免 @ 刷屏时反复提示 */
   lastCooldownNoticeAt = 0;
+  /** 伪随机加成：随机未命中时累加，命中后归零 */
+  randomBoost = 0;
   inFlight = false;
   followup: FollowupState | null = null;
   seen = new Map<string, number>();
