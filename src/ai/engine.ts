@@ -24,8 +24,8 @@ import {
   AUTO_MEMORY_LABEL,
 } from './learn';
 import { decideTrigger } from './trigger';
-import { buildJudgePrompt, buildReplyPrompt, buildUserPrompt, PASS_TOKEN } from './prompt';
-import { ChatProvider, ChatResult } from './provider';
+import { buildReplyPrompt, buildUserPrompt } from './prompt';
+import { ChatProvider } from './provider';
 import { pickImages, resolveImages } from './vision';
 import { selectMemoryBlocks, splitMemoryBlocks, tokenizeForMatch } from './memory';
 import { NameResolver, MemberIdentity } from '../core/names';
@@ -97,10 +97,13 @@ function usageText(usage: any): string {
   const cacheHit = usage.prompt_cache_hit_tokens
     ?? usage.cached_tokens
     ?? usage.cache_read_input_tokens;
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens
+    ?? usage.reasoning_tokens;
   const parts: string[] = [];
   if (input != null) parts.push(`in=${input}`);
   if (output != null) parts.push(`out=${output}`);
   if (cacheHit != null) parts.push(`cache=${cacheHit}`);
+  if (reasoning != null) parts.push(`reasoning=${reasoning}`);
   return parts.join(',');
 }
 
@@ -845,8 +848,6 @@ export class AiEngine {
       now: this.now(),
       lastAttemptAt: state.lastAttemptAt,
       minIntervalMs: Math.max(0, Number(this.setting(session, 'aiMinReplyIntervalSeconds') ?? 45)) * 1000,
-      lastReplyAt: state.lastReplyAt || 0,
-      mentionCooldownMs: Math.max(0, Number(this.config.aiMentionCooldownSeconds ?? 5)) * 1000,
       inFlight: state.inFlight,
       mention,
       followup,
@@ -906,15 +907,6 @@ export class AiEngine {
         webSearchEnabled: this.config.aiWebSearchEnabled !== false,
       };
 
-      if (allowPass && this.config.aiReplyDecision === 'two-stage') {
-        const judge = await this.judge(promptInput);
-        if (!judge) {
-          state.counter = 0;
-          this.log('ai-pass', { by: 'judge', latencyMs: this.now() - startedAt }, session);
-          return;
-        }
-      }
-
       const prompt = buildReplyPrompt(promptInput);
       if (this.debugPrompt) {
         this.host.logger.info(`[ai-debug] system=${prompt.system}\n[ai-debug] user=${prompt.user}`);
@@ -937,6 +929,14 @@ export class AiEngine {
           latencyMs: this.now() - startedAt,
         }, session);
         return;
+      }
+
+      if (result.finishReason === 'length') {
+        const cap = Number(this.config.aiMaxOutputTokens ?? 1500);
+        this.host.logger?.warn?.(
+          `[ai-budget] 输出触达 max_tokens=${cap}（思考 + 回答总上限），正文可能被截断；`
+          + `可在配置页调大 aiMaxOutputTokens | guild=${session.guildId ?? '?'}`,
+        );
       }
 
       const raw = String(result.text || '').trim();
@@ -993,7 +993,6 @@ export class AiEngine {
       }
 
       await this.host.sendReply(session, finalText);
-      state.lastReplyAt = this.now();
       state.counter = 0;
       this.recordSelf(session, finalText);
 
@@ -1208,27 +1207,6 @@ export class AiEngine {
       (ref) => this.host.resolveImage(ref, session),
       { maxCount, budgetMs: Number(this.config.aiImageBudgetMs ?? 6000) },
     );
-  }
-
-  private async judge(input: any): Promise<boolean> {
-    const prompt = buildJudgePrompt(input);
-    const result: ChatResult = await this.provider.chat({
-      system: prompt.system,
-      user: prompt.user,
-      temperature: 0.1,
-      maxTokens: 256,
-    });
-    if (!result.ok || !result.text) return false;
-    const match = result.text.match(/\{[\s\S]*\}/);
-    if (!match) return false;
-    try {
-      const parsed = JSON.parse(match[0]);
-      const score = Number(parsed?.score) || 0;
-      const min = Number(this.config.aiInterestMinScore ?? 60);
-      return !!parsed?.reply && score >= min;
-    } catch {
-      return false;
-    }
   }
 
   private platformAllowed(platform: string): boolean {

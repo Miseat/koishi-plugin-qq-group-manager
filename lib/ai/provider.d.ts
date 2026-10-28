@@ -25,6 +25,8 @@ export interface ChatResult {
     degradedToText?: boolean;
     /** 服务端 token 用量（OpenAI: usage；Gemini: usageMetadata） */
     usage?: any;
+    /** 停止原因：length 表示被 max_tokens / 上下文上限截断 */
+    finishReason?: string;
 }
 export interface ProviderConfig {
     aiProvider?: string;

@@ -27,6 +27,8 @@ export interface ChatResult {
   degradedToText?: boolean;
   /** 服务端 token 用量（OpenAI: usage；Gemini: usageMetadata） */
   usage?: any;
+  /** 停止原因：length 表示被 max_tokens / 上下文上限截断 */
+  finishReason?: string;
 }
 
 export interface ProviderConfig {
@@ -185,7 +187,13 @@ export class ChatProvider {
           error: `模型返回空内容(finish=${payload?.choices?.[0]?.finish_reason || 'unknown'})`,
         };
       }
-      return { ok: true, text, status: response.status, usage: payload?.usage };
+      return {
+        ok: true,
+        text,
+        status: response.status,
+        usage: payload?.usage,
+        finishReason: payload?.choices?.[0]?.finish_reason,
+      };
     } catch (error: any) {
       const aborted = error?.name === 'AbortError';
       return { ok: false, error: aborted ? '请求超时' : `请求失败: ${String(error?.message || error)}` };
@@ -234,7 +242,13 @@ export class ChatProvider {
         .join('')
         .trim();
       if (!text) return { ok: false, status: response.status, error: 'Gemini 返回空内容' };
-      return { ok: true, text, status: response.status, usage: payload?.usageMetadata };
+      return {
+        ok: true,
+        text,
+        status: response.status,
+        usage: payload?.usageMetadata,
+        finishReason: payload?.candidates?.[0]?.finishReason,
+      };
     } catch (error: any) {
       const aborted = error?.name === 'AbortError';
       return { ok: false, error: aborted ? '请求超时' : `请求失败: ${String(error?.message || error)}` };

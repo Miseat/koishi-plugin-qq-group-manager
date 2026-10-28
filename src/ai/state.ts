@@ -41,7 +41,6 @@ export class GroupState {
   records: ChatRecord[] = [];
   /** 自上次"完整考虑"（真正调用了模型）以来累计的消息数 */
   counter = 0;
-  lastReplyAt = 0;
   lastAttemptAt = 0;
   /** 上次发「冷却中」提示的时间，用于避免 @ 刷屏时反复提示 */
   lastCooldownNoticeAt = 0;

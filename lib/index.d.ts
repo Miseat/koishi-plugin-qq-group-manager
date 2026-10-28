@@ -12,7 +12,6 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     cmdCustom: Schema<string, string>;
     cmdVersion: Schema<string, string>;
     platformFilter: Schema<string[], string[]>;
-    responseStyle: Schema<"plain" | "meow", "plain" | "meow">;
     dryRun: Schema<boolean, boolean>;
 }> | Schemastery.ObjectS<{
     bannedWords: Schema<string[], string[]>;
@@ -147,7 +146,6 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiBaseUrl: Schema<string, string>;
     aiModel: Schema<string, string>;
     aiAgentName: Schema<string, string>;
-    aiMentionCooldownSeconds: Schema<number, number>;
     aiCooldownNotice: Schema<boolean, boolean>;
     aiCooldownNoticeText: Schema<string, string>;
     aiCooldownNoticeIntervalSeconds: Schema<number, number>;
@@ -182,7 +180,6 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiQuoteReplyProbability: Schema<number, number>;
     aiReadForwardMessage: Schema<boolean, boolean>;
     aiForwardMaxNodes: Schema<number, number>;
-    aiReplyDecision: Schema<"two-stage" | "single", "two-stage" | "single">;
     aiEnableImageRecognition: Schema<boolean, boolean>;
     aiImageMaxCount: Schema<number, number>;
     aiImageBudgetMs: Schema<number, number>;
@@ -194,19 +191,10 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiWebSearchCacheMinutes: Schema<number, number>;
     aiRequestTimeoutSeconds: Schema<number, number>;
     aiDebugPrompt: Schema<boolean, boolean>;
-    aiIgnoreCommandMessage: Schema<boolean, boolean>;
     aiEnableDirectMentionTrigger: Schema<boolean, boolean>;
     aiEnableFollowupAfterMention: Schema<boolean, boolean>;
     aiFollowupWindowSeconds: Schema<number, number>;
     aiFollowupMaxTurns: Schema<number, number>;
-    aiOwnerPlatform: Schema<string, string>;
-    aiOwnerUserId: Schema<string, string>;
-    aiHomePlatform: Schema<string, string>;
-    aiHomeUserId: Schema<string, string>;
-    aiInterestMinScore: Schema<number, number>;
-    aiInterestContextWindow: Schema<number, number>;
-    aiInterestModel: Schema<string, string>;
-    aiInterestMaxTokens: Schema<number, number>;
 }> | Schemastery.ObjectS<{
     allowedUserIds: Schema<string[], string[]>;
     allowGroupOwner: Schema<boolean, boolean>;
@@ -228,7 +216,6 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     cmdCustom: string;
     cmdVersion: string;
     platformFilter: string[];
-    responseStyle: "plain" | "meow";
     dryRun: boolean;
 } & import("koishi").Dict & {
     bannedWords: string[];
@@ -329,7 +316,6 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiBaseUrl: string;
     aiModel: string;
     aiAgentName: string;
-    aiMentionCooldownSeconds: number;
     aiCooldownNotice: boolean;
     aiCooldownNoticeText: string;
     aiCooldownNoticeIntervalSeconds: number;
@@ -360,7 +346,6 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiQuoteReplyProbability: number;
     aiReadForwardMessage: boolean;
     aiForwardMaxNodes: number;
-    aiReplyDecision: "two-stage" | "single";
     aiEnableImageRecognition: boolean;
     aiImageMaxCount: number;
     aiImageBudgetMs: number;
@@ -372,19 +357,10 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiWebSearchCacheMinutes: number;
     aiRequestTimeoutSeconds: number;
     aiDebugPrompt: boolean;
-    aiIgnoreCommandMessage: boolean;
     aiEnableDirectMentionTrigger: boolean;
     aiEnableFollowupAfterMention: boolean;
     aiFollowupWindowSeconds: number;
     aiFollowupMaxTurns: number;
-    aiOwnerPlatform: string;
-    aiOwnerUserId: string;
-    aiHomePlatform: string;
-    aiHomeUserId: string;
-    aiInterestMinScore: number;
-    aiInterestContextWindow: number;
-    aiInterestModel: string;
-    aiInterestMaxTokens: number;
 } & {
     allowedUserIds: string[];
     allowGroupOwner: boolean;

@@ -2,6 +2,37 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.4.9
+
+### 清理
+
+- 删除一批无效或冗余配置项，配置页不再显示这些「意义不明」的开关：
+
+  - `aiReplyDecision`：`two-stage` 判定路径整体移除（判定提示词、判定函数一并删除），
+    现在固定为「一次调用 + `<pass/>` 放弃」；
+  - `aiInterestMinScore`、`aiInterestContextWindow`、`aiInterestModel`、`aiInterestMaxTokens`：
+    只服务于 two-stage，且后三个在代码里从未被读取；
+  - `aiMentionCooldownSeconds`：1.4.7 起模型调用冷却已统一，旧字段不再生效；
+  - `aiOwnerPlatform`、`aiOwnerUserId`、`aiHomePlatform`、`aiHomeUserId`、`aiIgnoreCommandMessage`：
+    代码里没有任何引用，属于历史遗留；
+  - `responseStyle`：只会给指令回复加「喵~ 」前缀，需要喵味请在 qqgm-chat-style
+    里加一个风格 skill（插件内已无引用，固定普通输出）。
+
+  旧配置里残留的这些键会被 Schema 忽略，不影响启动。
+
+### 改进
+
+- 模型调用日志补充思考 token：`tokens="in=…,out=…,cache=…,reasoning=…"`。
+  `out` 是 completion 总数（含思考），`reasoning` 是其中思维链的部分，
+  可直接看出每次调用在思考上花了多少。
+
+- **明确 `aiMaxOutputTokens` 的语义：它是「思考 + 回答」的总上限（API 的 `max_tokens`），
+  不是只限制正文**。默认值从 400 调整为 1500（群聊接话建议 1000~2000）：
+  设得太小，预算会被思维链吃掉、正文被截断；设得太大，单次成本上限更高。
+
+- 当服务端返回 `finish_reason=length`（触达 `max_tokens`）时输出一条
+  `[ai-budget]` 告警，提示正文可能被截断，并给出当前上限。
+
 ## 1.4.8
 
 ### 新功能

@@ -167,19 +167,3 @@ export function buildReplyPrompt(input: PromptInput): { system: string; user: st
     user: buildUserPrompt(input),
   };
 }
-
-/** 两段式模式下的判定提示词（只有显式配置 aiReplyDecision=two-stage 才会用） */
-export function buildJudgePrompt(input: PromptInput): { system: string; user: string } {
-  const system = [
-    '你是群聊回复开关判定器。',
-    `当前群里有一个机器人，自称「${input.selfName}」。`,
-    '判断机器人现在是否应该接话。',
-    '只输出 JSON：{"reply":true|false,"score":0-100,"reason":"一句话"}。不要输出任何其它文字。',
-    '标准：与机器人无关、别人正在对话、纯刷屏 → reply=false；被点名、被追问、有明显互动价值 → reply=true。',
-  ].join('\n');
-  const user = buildUserPrompt({ ...input, allowPass: false }).replace(
-    /现在只输出一条回复正文。$/,
-    '现在只输出判定 JSON。',
-  );
-  return { system, user };
-}

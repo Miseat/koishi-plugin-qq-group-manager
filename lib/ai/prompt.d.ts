@@ -35,8 +35,3 @@ export declare function buildReplyPrompt(input: PromptInput): {
     system: string;
     user: string;
 };
-/** 两段式模式下的判定提示词（只有显式配置 aiReplyDecision=two-stage 才会用） */
-export declare function buildJudgePrompt(input: PromptInput): {
-    system: string;
-    user: string;
-};

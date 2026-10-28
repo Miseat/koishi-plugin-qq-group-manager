@@ -12,7 +12,7 @@
  * - 允许模型用 <pass/> 主动放弃，放弃也重置计数，避免每条消息都空转调用。
  */
 import { AiState, ChatRecord } from './state';
-import { ChatProvider, ChatResult } from './provider';
+import { ChatProvider } from './provider';
 import { RenderedImage } from '../core/text';
 import { AiHookRegistry } from './hooks';
 export interface AiHost {
@@ -147,7 +147,7 @@ export declare class AiEngine {
     private sendCooldownNotice;
     handle(session: any): Promise<void>;
     /** 供外部插件（如私聊插件）复用同一个模型 provider。 */
-    chat(request: any): Promise<ChatResult>;
+    chat(request: any): Promise<import("./provider").ChatResult>;
     /** 群内长时间没人说话时，生成一条主动话题。 */
     idleTopic(groupId: string): Promise<string>;
     /** 需要时调用 DeepSeek Search API；失败/不支持/没结果都返回空串，继续普通回复。 */
@@ -158,7 +158,6 @@ export declare class AiEngine {
     private readForwards;
     private recentImageRecords;
     private collectImages;
-    private judge;
     private platformAllowed;
     private log;
     /** 供指令/调试使用 */

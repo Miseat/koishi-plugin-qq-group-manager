@@ -16,9 +16,6 @@ export interface TriggerInput {
     now: number;
     lastAttemptAt: number;
     minIntervalMs: number;
-    /** 兼容字段：旧版按“上次回复”计算的 @ 冷却，已合并进 minIntervalMs */
-    lastReplyAt?: number;
-    mentionCooldownMs?: number;
     inFlight: boolean;
     mention: boolean;
     followup: boolean;
