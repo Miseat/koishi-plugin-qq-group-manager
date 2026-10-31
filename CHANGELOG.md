@@ -2,6 +2,27 @@
 
 本文件记录所有值得注意的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.4.11
+
+### 修复
+
+- **联网搜索命中缓存也会消耗每小时配额**。之前配额计数在缓存检查之前，
+  同一个 query 在缓存有效期内重复出现，明明没有发请求也会扣次数，很快就撞上 `rate-limit`。
+  现在先查缓存，命中直接返回、不占配额；换 query 仍受 `aiWebSearchMaxPerHour` 限制。
+  被限流时日志会带上 `limit` 和 `resetIn`（还有多少秒恢复），方便区分“配额用完”和“接口故障”。
+
+### 新增
+
+- **aiHooks v3：`registerPersonaOverride(provider)`**。外部插件可以按群覆盖主插件默认人设 /
+  系统提示词（qqgm-chat-style 的分群提示词用的就是这个）。
+
+- **`qqgmAiRuntime.images(session)`**。外部插件（qqgm-private）可以复用主插件的视觉链路，
+  把消息里的图片转成 data URL 后一起发给模型。
+
+### 说明
+
+- 不调用新接口的旧插件行为不变；`hooks.version` 升到 3。
+
 ## 1.4.10
 
 ### 新功能

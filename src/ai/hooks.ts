@@ -17,6 +17,9 @@ export interface AiHookContext {
 export type PromptSectionProvider = (ctx: AiHookContext) => string | Promise<string>;
 export type OutputFilter = (text: string, ctx: AiHookContext) => string | null | Promise<string | null>;
 
+/** 覆盖主插件的默认人设/系统提示词；返回空表示不覆盖。 */
+export type PersonaOverrideProvider = (ctx: AiHookContext) => string | null | Promise<string | null>;
+
 export interface AiAfterReplyContext extends AiHookContext {
   /** 已经发送并写入上下文的最终文本 */
   text: string;
@@ -54,13 +57,14 @@ export interface ContextEvictedContext {
 export type ContextEvictedHandler = (ctx: ContextEvictedContext) => void | Promise<void>;
 
 export class AiHookRegistry {
-  /** 钩子接口版本；外部插件应检查 >= 2 才能用 contextEvicted */
-  readonly version = 2;
+  /** 钩子接口版本；>=2 支持 contextEvicted，>=3 支持 registerPersonaOverride */
+  readonly version = 3;
 
   private sections = new Set<PromptSectionProvider>();
   private filters = new Set<OutputFilter>();
   private afterReplyHandlers = new Set<AfterReplyHandler>();
   private evictedHandlers = new Set<ContextEvictedHandler>();
+  private personaOverrides = new Set<PersonaOverrideProvider>();
 
   constructor(private logger?: any) {}
 
@@ -70,18 +74,25 @@ export class AiHookRegistry {
   }
 
   /** 诊断用：当前已注册的钩子数量。 */
-  stats(): { sections: number; filters: number; afterReply: number; evicted: number } {
+  stats(): { sections: number; filters: number; afterReply: number; evicted: number; persona: number } {
     return {
       sections: this.sections.size,
       filters: this.filters.size,
       afterReply: this.afterReplyHandlers.size,
       evicted: this.evictedHandlers.size,
+      persona: this.personaOverrides.size,
     };
   }
 
   registerPromptSection(provider: PromptSectionProvider): () => void {
     this.sections.add(provider);
     return () => this.sections.delete(provider);
+  }
+
+  /** 覆盖主插件默认人设（按群）；第一个返回非空文本的生效。 */
+  registerPersonaOverride(provider: PersonaOverrideProvider): () => void {
+    this.personaOverrides.add(provider);
+    return () => this.personaOverrides.delete(provider);
   }
 
   registerOutputFilter(filter: OutputFilter): () => void {
@@ -104,9 +115,21 @@ export class AiHookRegistry {
     return () => this.evictedHandlers.delete(handler);
   }
 
+  /** 第一个非空的人设覆盖生效；失败只记日志。 */
+  async collectPersonaOverride(ctx: AiHookContext): Promise<string | null> {
+    for (const provider of this.personaOverrides) {
+      try {
+        const text = await provider(ctx);
+        if (text && String(text).trim()) return String(text).trim();
+      } catch (error) {
+        this.logger?.warn?.(`[ai-hooks] persona override failed: ${String(error)}`);
+      }
+    }
+    return null;
+  }
+
   /** 汇总所有风格段；单个 provider 失败只记日志，不影响其它。 */
-  async collectSections(ctx: AiHookContext): Promise<string[]> {
-    const out: string[] = [];
+  async collectSections(ctx: AiHookContext): Promise<string[]> {    const out: string[] = [];
     for (const provider of this.sections) {
       try {
         const text = await provider(ctx);

@@ -227,16 +227,21 @@ export function apply(ctx) {
   // 发送前过滤；返回 null 表示这条不发（按 pass 处理）
   const off2 = hooks.registerOutputFilter((text) => text.replace(/首先/g, ''))
 
+  // 按群覆盖主插件默认人设（v3+；返回空表示不覆盖）
+  const off3 = hooks.registerPersonaOverride((ctx) => (ctx.groupId === '123456' ? '你是本群专属的猫娘' : null))
+
   ctx.on('dispose', () => {
     off1()
     off2()
+    off3()
   })
 }
 ```
 
 - 风格段插在基础规则之后、`<pass/>` 规则之前，并声明“与系统规则冲突时以系统规则为准”。
 - 过滤器按注册顺序执行，异常会被隔离；过滤后的文本才会写回上下文。
-- `hooks.version` 目前为 `1`，外部插件应先检查版本。
+- `hooks.version` 目前为 `3`：`>=2` 支持 `registerContextEvicted`，`>=3` 支持 `registerPersonaOverride`。
+- 私聊类插件还可以用 `ctx.root.get('qqgmAiRuntime').images(session)` 复用主插件的图片解析链路。
 
 
 ## 数据文件

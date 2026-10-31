@@ -176,7 +176,7 @@ export const Config = Schema.intersect([
         ]).role('radio').default('auto').description('联网搜索触发方式。'),
         aiWebSearchMaxResults: Schema.natural().min(1).max(10).default(5).description('每次联网搜索取几条结果。'),
         aiWebSearchTimeoutMs: Schema.natural().min(500).max(15000).default(4000).description('搜索请求超时（毫秒）。'),
-        aiWebSearchMaxPerHour: Schema.natural().min(0).max(100).default(10).description('每个群每小时最多搜索次数；0=不限。'),
+        aiWebSearchMaxPerHour: Schema.natural().min(0).max(100).default(10).description('每个群每小时最多搜索次数；0=不限。命中缓存不占次数。'),
         aiWebSearchCacheMinutes: Schema.natural().min(0).max(1440).default(10).description('相同 query 的结果缓存分钟数；0=不缓存。'),
         aiRequestTimeoutSeconds: Schema.natural().min(5).max(120).default(20).description('单次模型请求超时（秒）。'),
         aiDebugPrompt: Schema.boolean().default(false).description('调试：把最终系统提示词与用户提示词写入日志（排查"答非所问"时打开，平时关闭）。'),

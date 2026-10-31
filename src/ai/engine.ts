@@ -1106,10 +1106,11 @@ export class AiEngine {
         mode: 'reply',
       };
       const styleSections = this.clampStyle(await this.hooks.collectSections(hookCtx));
+      const personaOverride = await this.hooks.collectPersonaOverride(hookCtx);
       const webSearch = await this.webSearch(record, session);
       const promptInput = {
         selfName: this.selfName,
-        persona: this.personaPrompt,
+        persona: personaOverride || this.personaPrompt,
         groupId: String(session.guildId),
         records: this.clampContext(state.records),
         current: record,
@@ -1248,15 +1249,19 @@ export class AiEngine {
   async idleTopic(groupId: string): Promise<string> {
     const session = { guildId: groupId, isDirect: false, platform: 'onebot' };
     let sections: string[] = [];
+    let personaOverride: string | null = null;
     try {
-      sections = this.clampStyle(await this.hooks.collectSections({ session, groupId, mode: 'reply' }));
+      const hookCtx = { session, groupId, mode: 'reply' as const };
+      sections = this.clampStyle(await this.hooks.collectSections(hookCtx));
+      personaOverride = await this.hooks.collectPersonaOverride(hookCtx);
     } catch { /* ignore */ }
     const system = [
       `你是 QQ 群 ${groupId} 里的一个普通成员。`,
+      personaOverride || this.personaPrompt,
       '群里已经很久没人说话了。主动抛一个轻松、具体、能接话的话题，一句话。',
       '不要问“在吗”，不要提“很久没人说话”，不要自我介绍。',
       ...sections,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     const result = await this.provider.chat({
       system,
       user: '现在发一条主动话题。',
@@ -1284,22 +1289,31 @@ export class AiEngine {
     const now = this.now();
     if (this.searchUnsupportedUntil > now) return '';
     const groupId = String(session?.guildId || '');
-    const maxPerHour = Math.max(0, Number(this.config.aiWebSearchMaxPerHour ?? 10));
-    if (maxPerHour > 0) {
-      const list = (this.searchRate.get(groupId) || []).filter((t) => now - t < 3600_000);
-      if (list.length >= maxPerHour) {
-        this.log('web-search', { ok: false, reason: 'rate-limit', groupId }, session);
-        return '';
-      }
-      list.push(now);
-      this.searchRate.set(groupId, list);
-    }
 
+    // 先查缓存：命中缓存不消耗搜索配额
     const cacheMinutes = Math.max(0, Number(this.config.aiWebSearchCacheMinutes ?? 10));
     const cacheKey = `${String(this.config.aiBaseUrl || '')}|${query}`;
     if (cacheMinutes > 0) {
       const hit = this.searchCache.get(cacheKey);
       if (hit && now - hit.at < cacheMinutes * 60_000) return hit.section;
+    }
+
+    const maxPerHour = Math.max(0, Number(this.config.aiWebSearchMaxPerHour ?? 30));
+    if (maxPerHour > 0) {
+      const list = (this.searchRate.get(groupId) || []).filter((t) => now - t < 3600_000);
+      if (list.length >= maxPerHour) {
+        const resetIn = Math.max(1, Math.ceil((list[0] + 3600_000 - now) / 1000));
+        this.log('web-search', {
+          ok: false,
+          reason: 'rate-limit',
+          limit: maxPerHour,
+          resetIn,
+          groupId,
+        }, session);
+        return '';
+      }
+      list.push(now);
+      this.searchRate.set(groupId, list);
     }
 
     const startedAt = this.now();
@@ -1421,6 +1435,28 @@ export class AiEngine {
 
     return resolveImages(
       items,
+      (ref) => this.host.resolveImage(ref, session),
+      { maxCount, budgetMs: Number(this.config.aiImageBudgetMs ?? 6000) },
+    );
+  }
+
+  /**
+   * 供外部插件（qqgm-private）复用：把一条私聊消息里的图片解析成 data URL。
+   * 不做上下文回看，只看当前消息本身。
+   */
+  async resolveSessionImages(session: any): Promise<string[]> {
+    if (this.config.aiEnableImageRecognition === false) return [];
+    const maxCount = Math.max(0, Number(this.config.aiImageMaxCount ?? 2));
+    if (!maxCount) return [];
+    let own: RenderedImage[] = [];
+    try {
+      own = this.host.extractImages(session) || [];
+    } catch {
+      own = [];
+    }
+    if (!own.length) return [];
+    return resolveImages(
+      own,
       (ref) => this.host.resolveImage(ref, session),
       { maxCount, budgetMs: Number(this.config.aiImageBudgetMs ?? 6000) },
     );

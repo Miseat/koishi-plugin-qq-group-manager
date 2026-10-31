@@ -50,7 +50,7 @@ test('过滤器抛错时保留当前文本并继续', async () => {
 });
 
 test('接口版本为 2', () => {
-  assert.equal(new AiHookRegistry().version, 2);
+  assert.equal(new AiHookRegistry().version, 3);
 });
 
 test('afterReply 按注册顺序执行，异常隔离', async () => {

@@ -14,6 +14,8 @@ export interface AiHookContext {
 }
 export type PromptSectionProvider = (ctx: AiHookContext) => string | Promise<string>;
 export type OutputFilter = (text: string, ctx: AiHookContext) => string | null | Promise<string | null>;
+/** 覆盖主插件的默认人设/系统提示词；返回空表示不覆盖。 */
+export type PersonaOverrideProvider = (ctx: AiHookContext) => string | null | Promise<string | null>;
 export interface AiAfterReplyContext extends AiHookContext {
     /** 已经发送并写入上下文的最终文本 */
     text: string;
@@ -47,12 +49,13 @@ export interface ContextEvictedContext {
 export type ContextEvictedHandler = (ctx: ContextEvictedContext) => void | Promise<void>;
 export declare class AiHookRegistry {
     private logger?;
-    /** 钩子接口版本；外部插件应检查 >= 2 才能用 contextEvicted */
-    readonly version = 2;
+    /** 钩子接口版本；>=2 支持 contextEvicted，>=3 支持 registerPersonaOverride */
+    readonly version = 3;
     private sections;
     private filters;
     private afterReplyHandlers;
     private evictedHandlers;
+    private personaOverrides;
     constructor(logger?: any);
     /** 主插件重载后把新实例的 logger 接到同一个注册表上。 */
     setLogger(logger?: any): void;
@@ -62,8 +65,11 @@ export declare class AiHookRegistry {
         filters: number;
         afterReply: number;
         evicted: number;
+        persona: number;
     };
     registerPromptSection(provider: PromptSectionProvider): () => void;
+    /** 覆盖主插件默认人设（按群）；第一个返回非空文本的生效。 */
+    registerPersonaOverride(provider: PersonaOverrideProvider): () => void;
     registerOutputFilter(filter: OutputFilter): () => void;
     /** 文字回复已发送后触发；用于追加表情包等后续动作。 */
     registerAfterReply(handler: AfterReplyHandler): () => void;
@@ -72,6 +78,8 @@ export declare class AiHookRegistry {
      * 用于把这些即将被丢弃的消息交给外部插件做归纳、归档等。
      */
     registerContextEvicted(handler: ContextEvictedHandler): () => void;
+    /** 第一个非空的人设覆盖生效；失败只记日志。 */
+    collectPersonaOverride(ctx: AiHookContext): Promise<string | null>;
     /** 汇总所有风格段；单个 provider 失败只记日志，不影响其它。 */
     collectSections(ctx: AiHookContext): Promise<string[]>;
     /** 依次执行输出过滤器；返回 null 表示丢弃本条回复。 */

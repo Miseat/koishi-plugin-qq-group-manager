@@ -179,6 +179,11 @@ export declare class AiEngine {
     private readForwards;
     private recentImageRecords;
     private collectImages;
+    /**
+     * 供外部插件（qqgm-private）复用：把一条私聊消息里的图片解析成 data URL。
+     * 不做上下文回看，只看当前消息本身。
+     */
+    resolveSessionImages(session: any): Promise<string[]>;
     private platformAllowed;
     private log;
     /** 供指令/调试使用 */

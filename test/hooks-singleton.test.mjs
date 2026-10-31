@@ -21,7 +21,7 @@ test('钩子注册表跨模块重载保持同一对象（主插件单独重启�
   const again = reloaded.getSharedAiHooks();
 
   assert.equal(again, registry, '重载后必须是同一个注册表实例');
-  assert.equal(again.version, 2);
+  assert.equal(again.version, 3);
 
   const sections = await again.collectSections({ groupId: '1' });
   assert.deepEqual(sections, ['测试风格段']);

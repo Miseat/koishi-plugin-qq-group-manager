@@ -25,5 +25,7 @@ export declare class AiRuntimeFacade {
     get config(): any;
     get hooks(): AiHookRegistry;
     chat(request: AiRuntimeChatRequest): Promise<any>;
+    /** 把一条消息里的图片解析成 data URL（私聊插件复用主插件的视觉链路） */
+    images(session: any): Promise<string[]>;
 }
 export declare function getAiRuntimeFacade(): AiRuntimeFacade;

@@ -100,5 +100,5 @@ test('单个挤出 handler 抛错不影响其它', async () => {
 });
 
 test('hooks 版本为 2', () => {
-  assert.equal(new AiHookRegistry().version, 2);
+  assert.equal(new AiHookRegistry().version, 3);
 });
