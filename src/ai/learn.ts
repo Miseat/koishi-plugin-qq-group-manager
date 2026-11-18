@@ -36,7 +36,7 @@ const CATEGORY_ALIASES: Record<string, string> = {
 };
 
 export function normalizeMemoryCategory(raw: string): string {
-  const value = String(raw || '').trim().replace(/[「」【】\[\]]/g, '');
+  const value = String(raw || '').trim().replace(/[\s*_`「」【】\[\]]/g, '');
   if (!value) return '其他';
   if ((MEMORY_CATEGORIES as readonly string[]).includes(value)) return value;
   for (const key of Object.keys(CATEGORY_ALIASES)) {
@@ -213,7 +213,7 @@ export function parseSummaryEntries(raw: string, maxChars = MAX_SUMMARY_CHARS): 
       category = normalizeMemoryCategory(match[1]);
       body = match[2];
     }
-    const cleaned = cleanSummary(body, maxChars);
+    const cleaned = cleanSummary(body.replace(/\*\*/g, ''), maxChars);
     if (!cleaned) continue;
     const key = `${category}|${cleaned}`;
     if (seen.has(key)) continue;

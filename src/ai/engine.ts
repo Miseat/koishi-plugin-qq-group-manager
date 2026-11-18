@@ -1373,6 +1373,11 @@ export class AiEngine {
     const contextText = records
       .map((record) => renderRecordLine(record, this.selfName))
       .join('\n');
+    const lastAt = records.length ? Number(records[records.length - 1].at) || 0 : 0;
+    const gapMinutes = lastAt ? Math.max(0, Math.round((this.now() - lastAt) / 60000)) : 0;
+    const contextLabel = gapMinutes
+      ? `【最近聊天】（最后一条 ${gapMinutes} 分钟前）`
+      : '【最近聊天】';
 
     // 相关记忆：用最近几句话做查询；没有上下文就取最近两条
     let memories: string[] = [];
@@ -1395,7 +1400,12 @@ export class AiEngine {
     let searchSection = '';
     if (this.config.aiIdleTopicWebSearch !== false) {
       const lastText = records.length ? String(records[records.length - 1].text || '') : '';
-      const seed = lastText.length >= 4 ? lastText : '今天有什么热点话题';
+      const cleanLast = lastText
+        .replace(/\[[^\]]{1,16}\]/g, ' ')
+        .replace(/[图片表情视频语音文件]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const seed = cleanLast.length >= 4 ? cleanLast : '今天有什么热点话题';
       try {
         searchSection = await this.webSearch({ text: seed } as ChatRecord, session, true);
       } catch { /* ignore */ }
@@ -1407,7 +1417,7 @@ export class AiEngine {
       personaOverride || this.personaPrompt,
       `现在是 ${nowText}。`,
       '群里已经很久没人说话了。主动抛一个轻松、具体、能接话的话题，一句话。',
-      contextText ? `【最近聊天】\n${contextText}` : '',
+      contextText ? `${contextLabel}\n${contextText}` : '',
       memories.length ? `【相关记忆】\n${memories.map((item) => `- ${item}`).join('\n')}` : '',
       searchSection,
       '要求：',
