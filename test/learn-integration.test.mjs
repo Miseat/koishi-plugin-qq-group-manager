@@ -133,5 +133,5 @@ test('白名单命中时归纳（真实聊天记录，非系统备注）', async
   assert.ok(writes.length >= 1, '应至少归纳一次');
   assert.equal(writes[0].scope.kind, 'group');
   assert.equal(writes[0].scope.id, '1103369527');
-  assert.equal(writes[0].label, '自动归纳');
+  assert.equal(writes[0].label, '自动归纳 · 其他');
 });

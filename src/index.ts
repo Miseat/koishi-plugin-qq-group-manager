@@ -133,6 +133,7 @@ export const Config = Schema.intersect([
         aiIdleTopicMinHour: Schema.natural().min(0).max(23).default(9).description('主动话题允许的最早小时（0-23）。'),
         aiIdleTopicMaxHour: Schema.natural().min(0).max(24).default(23).description('主动话题允许的最晚小时（不含）。'),
         aiIdleTopicCooldownMinutes: Schema.natural().min(1).max(1440).default(60).description('两次主动话题之间的最小间隔（分钟）。'),
+        aiIdleTopicWebSearch: Schema.boolean().default(true).description('主动话题前先搜一次（优先用最近聊天内容做 query，没有上下文就搜当天热点）；搜不到或无关会自动忽略。'),
         aiSystemPrompt: Schema.string().role('textarea').default('你是群聊中的友好机器人，请简洁、自然、符合中文互联网语境地回复。').description('默认系统提示词。'),
         aiActivePersona: Schema.string().default('').description('启用的人格 ID（为空时使用默认自称与默认提示词）。'),
         aiPersonas: Schema.array(Schema.object({

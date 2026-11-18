@@ -8,6 +8,13 @@
  * 归纳出来的内容是一次性的一长串，150 字以内，写入对应作用域的记忆文件。
  */
 export declare const MAX_SUMMARY_CHARS = 150;
+/** 记忆分类：一条记忆只属于一类，便于存储与检索 */
+export declare const MEMORY_CATEGORIES: readonly ["人物关系", "偏好立场", "群内黑话", "长期话题", "约定事件", "其他"];
+export declare function normalizeMemoryCategory(raw: string): string;
+export interface SummaryEntry {
+    category: string;
+    text: string;
+}
 export interface EvictedLike {
     id?: string;
     userId?: string;
@@ -50,7 +57,7 @@ export declare class LearnStore {
 }
 /** 把一批消息渲染成模型可读的文本 */
 export declare function renderForSummary(records: EvictedLike[], selfName?: string): string;
-/** 归纳提示词 */
+/** 归纳提示词：按类别输出多条，一条只写一类 */
 export declare function buildSummaryPrompt(records: EvictedLike[], options?: {
     kind?: string;
     selfName?: string;
@@ -58,6 +65,8 @@ export declare function buildSummaryPrompt(records: EvictedLike[], options?: {
     system: string;
     user: string;
 };
+/** 解析模型输出的多分类记忆 */
+export declare function parseSummaryEntries(raw: string, maxChars?: number): SummaryEntry[];
 /** 清洗模型输出 */
 export declare function cleanSummary(raw: string, maxChars?: number): string;
 /** Jaccard 相似度，用于挡住重复记忆 */
@@ -70,8 +79,10 @@ export declare const AUTO_MEMORY_LABEL = "\u81EA\u52A8\u5F52\u7EB3";
 export declare function isAutoMemoryBlock(block: string): boolean;
 /** 取记忆块正文（去掉 `## 时间 · 来源` 标题行） */
 export declare function memoryBlockBody(block: string): string;
+/** 取记忆块的分类；旧格式没有分类时归入「其他」 */
+export declare function memoryBlockCategory(block: string): string;
 /**
- * 记忆压缩提示词：把 N 条自动归纳合并成一条更短的。
+ * 记忆压缩提示词：把 N 条同分类的自动归纳合并成一条更短的。
  *
  * 目的不是“再总结一遍”，而是去掉重复与过时信息——群里连续几天聊同一件事时，
  * 自动归纳会反复产出高度相似的条目，压缩后只保留事实差异。
@@ -79,6 +90,7 @@ export declare function memoryBlockBody(block: string): string;
 export declare function buildConsolidatePrompt(blocks: string[], options?: {
     maxChars?: number;
     kind?: string;
+    category?: string;
 }): {
     system: string;
     user: string;

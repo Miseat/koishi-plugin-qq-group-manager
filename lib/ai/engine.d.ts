@@ -143,13 +143,14 @@ export declare class AiEngine {
     /** 把一批消息归纳成一条记忆并写入对应作用域；返回写入结果或 null */
     private summarizeRecords;
     /**
-     * 自动归纳写入策略（1.4.7+）：
-     *   - 每累计 N 条（默认 5）就把最早的 N-1 条 + 本次新记忆压缩成 1 条；
-     *   - 自动记忆总数超过上限（默认 15）时同样触发压缩；
+     * 自动归纳写入策略（分类版）：
+     *   - 记忆按分类存，一条只属于一类；
+     *   - 同一分类累计 N 条（默认 5）时，把最早的 N-1 条 + 本次压成 1 条；
+     *   - 自动记忆总数超过上限（默认 15）时，压缩条数最多的分类里最老的一组；
      *   - 压缩失败时退回普通追加，不丢数据，下次归纳会再试。
      */
     private saveLearnedMemory;
-    /** 调模型把若干条自动记忆压成一条更短的 */
+    /** 调模型把若干条同分类自动记忆压成一条更短的 */
     private consolidateMemories;
     private findBot;
     private isMention;
@@ -169,7 +170,7 @@ export declare class AiEngine {
     handle(session: any): Promise<void>;
     /** 供外部插件（如私聊插件）复用同一个模型 provider。 */
     chat(request: any): Promise<import("./provider").ChatResult>;
-    /** 群内长时间没人说话时，生成一条主动话题。 */
+    /** 群内长时间没人说话时，生成一条主动话题：带时间/季节、最近上下文、相关记忆和联网结果。 */
     idleTopic(groupId: string): Promise<string>;
     /** 需要时调用 DeepSeek Search API；失败/不支持/没结果都返回空串，继续普通回复。 */
     private webSearch;

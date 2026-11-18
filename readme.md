@@ -190,11 +190,11 @@ npm i @nestim/koishi-plugin-qq-group-manager
 累计到阈值（aiContextWindow × memoryLearnThresholdScale）
   或空闲满 memoryLearnIdleHours（且期间有新消息）
    ↓
-模型归纳成一条 ≤ memoryLearnMaxChars 的记忆
+模型归纳成 1~3 条分类记忆（每条 ≤ memoryLearnMaxChars）
    ↓ 与已有记忆去重
 写入 Memory_<群号>_群聊.md / Memory_<QQ号>_私聊.md
    ↓ 回推原会话
-「刚记住了：……」
+「刚记住了：人物关系：……；偏好立场：……」
 ```
 
 要点：
@@ -203,12 +203,29 @@ npm i @nestim/koishi-plugin-qq-group-manager
 - **不会串台**：私聊发私聊，群聊发对应群。
 - **不会记废话**：提示词只允许人物关系、稳定偏好、群内黑话、反复出现的话题；
   寒暄、一次性情绪、已结束的接梗、纯表情全部丢弃。
+- **按类分开存**：人物关系 / 偏好立场 / 群内黑话 / 长期话题 / 约定事件 / 其他；
+  一条记忆只写一类，标题形如 `## 2026/11/18 18:51:00 · 自动归纳 · 人物关系`。
+  同类每 `memoryLearnConsolidateEvery` 条压缩成 1 条，自动记忆总数上限 `memoryLearnMaxEntries`。
 - **不会重复记**：写入前做相似度比对，超过 `memoryLearnDuplicateThreshold` 就跳过。
 - **不会刷爆额度**：每作用域每天最多 `memoryLearnDailyLimit` 次。
 - **系统备注与指令消息不参与归纳**（复读、命令结果等）。
 
 自动写入了什么，可以直接在 Koishi 控制台「探索器」打开对应的 `Memory_*.md` 查看。
 条目带的时间戳与来源标记能让你区分手动 `[memory]` 与 AI 自动归纳。
+
+## 主动话题
+
+群内超过 `aiIdleTopicMinutes` 没有新消息，且处于 `aiIdleTopicMinHour`～`aiIdleTopicMaxHour`
+之间时，AI 会主动发一条话题（两次之间至少隔 `aiIdleTopicCooldownMinutes`）。
+
+提示词会带上：
+
+- 当前日期、星期、时间与季节（例如“2026年11月18日星期三 18:51（冬）”），并明确要求不要提与季节/时间不符的内容；
+- 该群最近 12 条聊天，要求优先接着最近的话题或梗往下说，而不是凭空抛一个无关话题；
+- 按最近聊天检索到的相关记忆；
+- `aiIdleTopicWebSearch` 开启时（默认开），用最近一句做 query 搜一次；没有上下文就搜当天热点，
+  结果不相关会自动忽略，搜不到也不影响发话题。
+
 ## 外部插件接口（1.2.2+）
 
 主插件暴露一个很小的扩展点，第三方插件可以给 AI 追加“说话风格”，或在发送前过滤输出，

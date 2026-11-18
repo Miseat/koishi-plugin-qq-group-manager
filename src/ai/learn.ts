@@ -12,6 +12,44 @@ import { truncate } from '../core/text';
 
 export const MAX_SUMMARY_CHARS = 150;
 
+/** 记忆分类：一条记忆只属于一类，便于存储与检索 */
+export const MEMORY_CATEGORIES = ['人物关系', '偏好立场', '群内黑话', '长期话题', '约定事件', '其他'] as const;
+
+const CATEGORY_ALIASES: Record<string, string> = {
+  人物: '人物关系',
+  关系: '人物关系',
+  称呼: '人物关系',
+  身份: '人物关系',
+  偏好: '偏好立场',
+  立场: '偏好立场',
+  喜好: '偏好立场',
+  观点: '偏好立场',
+  黑话: '群内黑话',
+  梗: '群内黑话',
+  术语: '群内黑话',
+  缩写: '群内黑话',
+  话题: '长期话题',
+  约定: '约定事件',
+  事件: '约定事件',
+  计划: '约定事件',
+  其他: '其他',
+};
+
+export function normalizeMemoryCategory(raw: string): string {
+  const value = String(raw || '').trim().replace(/[「」【】\[\]]/g, '');
+  if (!value) return '其他';
+  if ((MEMORY_CATEGORIES as readonly string[]).includes(value)) return value;
+  for (const key of Object.keys(CATEGORY_ALIASES)) {
+    if (value.includes(key)) return CATEGORY_ALIASES[key];
+  }
+  return '其他';
+}
+
+export interface SummaryEntry {
+  category: string;
+  text: string;
+}
+
 export interface EvictedLike {
   id?: string;
   userId?: string;
@@ -116,7 +154,7 @@ export function renderForSummary(records: EvictedLike[], selfName = 'bot'): stri
   return lines.join('\n');
 }
 
-/** 归纳提示词 */
+/** 归纳提示词：按类别输出多条，一条只写一类 */
 export function buildSummaryPrompt(
   records: EvictedLike[],
   options: { kind?: string; selfName?: string } = {},
@@ -131,18 +169,59 @@ export function buildSummaryPrompt(
     '2. 稳定的偏好、立场、习惯（不是一时的情绪）',
     '3. 群内或两人之间约定俗成的说法、黑话',
     '4. 反复出现、以后还会聊到的话题',
+    '5. 明确的约定、时间、计划',
     '',
     '必须丢掉：寒暄、打招呼、一次性的抱怨或玩笑、已经结束的接梗、纯表情。',
     '',
     '输出要求：',
-    '- 只输出一条记忆，纯文本，不要标题、不要列表、不要编号、不要 Markdown；',
-    `- 不超过 ${MAX_SUMMARY_CHARS} 字；`,
+    '- 按类别拆开，每条一行，格式必须是「类别：内容」；',
+    `- 类别只能是：${MEMORY_CATEGORIES.join('、')}；`,
+    '- 一条记忆只写一个类别，不要在一句里混入另一个类别的内容；',
+    '- 最多输出 3 条；同类最多 2 条；',
+    '- 不要标题、列表符号、编号、Markdown、引号；',
+    `- 每条不超过 ${MAX_SUMMARY_CHARS} 字；`,
     '- 用陈述句写事实，不要写「他们聊到」「讨论了」这类过程描述；',
     '- 如果没有任何值得长期记住的内容，只输出一个词：NONE',
   ].join('\n');
 
-  const user = ['【记录】', body || '（空）', '', '现在输出那一条记忆，或输出 NONE。'].join('\n');
+  const user = ['【记录】', body || '（空）', '', '现在输出分类后的记忆（类别：内容），或输出 NONE。'].join('\n');
   return { system, user };
+}
+
+/** 解析模型输出的多分类记忆 */
+export function parseSummaryEntries(raw: string, maxChars = MAX_SUMMARY_CHARS): SummaryEntry[] {
+  let text = String(raw || '').trim();
+  if (!text) return [];
+  text = text
+    .replace(/^```[a-zA-Z0-9_-]*\s*\n?/, '')
+    .replace(/\n?\s*```\s*$/, '')
+    .trim();
+  if (/^(?:none|无|没有|n\/a)$/i.test(text)) return [];
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*+·]|\d+[.)、])\s*/, '').trim())
+    .filter(Boolean);
+
+  const out: SummaryEntry[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    let category = '其他';
+    let body = line;
+    const match = /^([^：:]{1,12})[：:]\s*(.+)$/.exec(line);
+    if (match) {
+      category = normalizeMemoryCategory(match[1]);
+      body = match[2];
+    }
+    const cleaned = cleanSummary(body, maxChars);
+    if (!cleaned) continue;
+    const key = `${category}|${cleaned}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ category, text: cleaned });
+    if (out.length >= 3) break;
+  }
+  return out;
 }
 
 /** 清洗模型输出 */
@@ -241,27 +320,36 @@ export function memoryBlockBody(block: string): string {
   return lines.slice(1).join('\n').trim();
 }
 
+/** 取记忆块的分类；旧格式没有分类时归入「其他」 */
+export function memoryBlockCategory(block: string): string {
+  const first = String(block || '').split('\n', 1)[0] || '';
+  const match = /·\s*自动归纳\s*·\s*([^·\n]+)/.exec(first);
+  return normalizeMemoryCategory(match ? match[1] : '其他');
+}
+
 /**
- * 记忆压缩提示词：把 N 条自动归纳合并成一条更短的。
+ * 记忆压缩提示词：把 N 条同分类的自动归纳合并成一条更短的。
  *
  * 目的不是“再总结一遍”，而是去掉重复与过时信息——群里连续几天聊同一件事时，
  * 自动归纳会反复产出高度相似的条目，压缩后只保留事实差异。
  */
 export function buildConsolidatePrompt(
   blocks: string[],
-  options: { maxChars?: number; kind?: string } = {},
+  options: { maxChars?: number; kind?: string; category?: string } = {},
 ): { system: string; user: string } {
   const maxChars = Math.max(40, Number(options.maxChars) || 90);
   const label = options.kind === 'private' ? '私聊' : '群聊';
+  const category = normalizeMemoryCategory(options.category || '其他');
   const bodies = (blocks || [])
     .map((block) => memoryBlockBody(block).replace(/\s+/g, ' ').trim())
     .filter(Boolean);
 
   const system = [
-    `你在压缩一段${label}的长期记忆。`,
+    `你在压缩一段${label}里「${category}」类的长期记忆。`,
     `下面有 ${bodies.length} 条已经归纳过的记忆，请合并成一条。`,
     '',
     '要求：',
+    `- 只合并「${category}」这一类的信息，不要混入其他类别；`,
     '- 只保留互不重复的事实：人物与称呼、关系、稳定偏好、反复出现的话题；',
     '- 删掉重复表述、一次性情绪、已经过时的细节；',
     '- 不要编造，不要写“他们聊到”“讨论了”这类过程描述；',

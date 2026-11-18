@@ -153,6 +153,7 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiIdleTopicMinHour: Schema<number, number>;
     aiIdleTopicMaxHour: Schema<number, number>;
     aiIdleTopicCooldownMinutes: Schema<number, number>;
+    aiIdleTopicWebSearch: Schema<boolean, boolean>;
     aiSystemPrompt: Schema<string, string>;
     aiActivePersona: Schema<string, string>;
     aiPersonas: Schema<Schemastery.ObjectS<{
@@ -324,6 +325,7 @@ export declare const Config: Schema<Schemastery.ObjectS<{
     aiIdleTopicMinHour: number;
     aiIdleTopicMaxHour: number;
     aiIdleTopicCooldownMinutes: number;
+    aiIdleTopicWebSearch: boolean;
     aiSystemPrompt: string;
     aiActivePersona: string;
     aiPersonas: Schemastery.ObjectT<{
