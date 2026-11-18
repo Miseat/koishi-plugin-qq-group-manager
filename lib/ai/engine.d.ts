@@ -141,6 +141,32 @@ export declare class AiEngine {
     dispose(): void;
     private learnAndReport;
     /** 把一批消息归纳成一条记忆并写入对应作用域；返回写入结果或 null */
+    /** 解析会话对应的记忆作用域 */
+    private scopeForSession;
+    /**
+     * [memory] summarize：立即触发一次归纳。
+     *
+     * 优先用「已被挤出、还没归纳」的待归纳桶；桶空时退化为最近上下文，
+     * 这样手动触发不会因为还没挤出消息而什么都不做。
+     */
+    learnNow(session: any): Promise<{
+        ok: boolean;
+        entries: number;
+        text: string;
+        reason: string;
+    }>;
+    /**
+     * [memory] organize：立即整理一次。
+     *
+     * 把每个分类里 ≥2 条的自动记忆合并成 1 条；手动记忆不动。
+     */
+    organizeNow(session: any): Promise<{
+        ok: boolean;
+        categories: number;
+        removed: number;
+        after: number;
+        reason: string;
+    }>;
     private summarizeRecords;
     /**
      * 自动归纳写入策略（分类版）：

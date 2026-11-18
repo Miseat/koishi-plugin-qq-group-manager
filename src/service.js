@@ -2816,6 +2816,8 @@ class QQGroupManagerService extends koishi_1.Service {
             '解除禁言 ' + P('cmdUnmute', '[unmute]') + ' qq reason',
             '记忆保存 ' + P('cmdMemory', '[memory]') + ' content',
             '记忆查询 ' + P('cmdMemory', '[memory]') + ' search keyword',
+            '记忆归纳 ' + P('cmdMemory', '[memory]') + ' summarize',
+            '记忆整理 ' + P('cmdMemory', '[memory]') + ' organize',
             '拉黑 ' + P('cmdBan', '[ban]') + ' qq reason',
             '解除拉黑 ' + P('cmdUnban', '[unban]') + ' qq reason',
             '黑名单查询 ' + P('cmdBanList', '[banlist]'),
@@ -2996,7 +2998,7 @@ class QQGroupManagerService extends koishi_1.Service {
         }
         const sub = rest.trim();
         if (!sub) {
-            await session.send(this.styleText(`用法：${this.cmdPrefix('cmdMemory', '[memory]')} content 保存｜${this.cmdPrefix('cmdMemory', '[memory]')} list 列出｜${this.cmdPrefix('cmdMemory', '[memory]')} search keyword 查询｜${this.cmdPrefix('cmdMemory', '[memory]')} delete keyword 删除`));
+            await session.send(this.styleText(`用法：${this.cmdPrefix('cmdMemory', '[memory]')} content 保存｜${this.cmdPrefix('cmdMemory', '[memory]')} list 列出｜${this.cmdPrefix('cmdMemory', '[memory]')} search keyword 查询｜${this.cmdPrefix('cmdMemory', '[memory]')} delete keyword 删除｜${this.cmdPrefix('cmdMemory', '[memory]')} summarize 归纳｜${this.cmdPrefix('cmdMemory', '[memory]')} organize 整理`));
             return true;
         }
         const delMatch = sub.match(/^(?:delete|del)\s*([\s\S]*)$/i);
@@ -3053,6 +3055,51 @@ class QQGroupManagerService extends koishi_1.Service {
             const reply = results.map((b, i) => `${i + 1}. ${b.replace(/\n+/g, ' ').trim()}`).join('\n');
             await session.send(this.styleText(keyword ? `包含「${keyword}」的记忆：\n${reply}` : `最近的记忆：\n${reply}`));
             this._logger.info(`[cmd:memory] 查询 keyword=${keyword || '-'} 命中=${results.length} | ${this.sessionTag(session)}`);
+            return true;
+        }
+        // 手动归纳：[memory] summarize / [memory] 归纳 / [memory] 总结
+        const summarizeMatch = /^(?:summarize|summary|归纳|总结)\s*$/i.exec(sub);
+        if (summarizeMatch) {
+            const auth = await this.authorizeCommand('memory', session);
+            if (!auth.ok)
+                return this.denyAdmin(session, auth.userMessage || '只有主人或管理员可以触发记忆归纳。');
+            await session.send(this.styleText('正在归纳，稍等…'));
+            const r = await this.ai.learnNow(session);
+            if (!r.ok) {
+                const message = r.reason === 'empty'
+                    ? '没有可归纳的消息。'
+                    : r.reason === 'no-scope'
+                        ? '当前会话无法确定记忆作用域。'
+                        : '这次没有提炼出值得长期记住的内容。';
+                await session.send(this.styleText(message));
+                return true;
+            }
+            const body = r.text.length > 400 ? `${r.text.slice(0, 400)}…` : r.text;
+            await session.send(this.styleText(`已归纳 ${r.entries} 条：\n${body}`));
+            this._logger.info(`[cmd:memory] 手动归纳 entries=${r.entries} source=${r.reason} | ${this.sessionTag(session)}`);
+            return true;
+        }
+        // 手动整理：[memory] organize / [memory] 整理
+        const organizeMatch = /^(?:organize|tidy|整理)\s*$/i.exec(sub);
+        if (organizeMatch) {
+            const auth = await this.authorizeCommand('memory', session);
+            if (!auth.ok)
+                return this.denyAdmin(session, auth.userMessage || '只有主人或管理员可以触发记忆整理。');
+            await session.send(this.styleText('正在整理，稍等…'));
+            const r = await this.ai.organizeNow(session);
+            if (!r.ok) {
+                const message = r.reason === 'empty'
+                    ? '记忆库里还没有自动归纳的内容。'
+                    : '当前会话无法确定记忆作用域。';
+                await session.send(this.styleText(message));
+                return true;
+            }
+            if (!r.categories) {
+                await session.send(this.styleText(`当前自动记忆已经足够精简（${r.after} 条），没有可合并的同类条目。`));
+                return true;
+            }
+            await session.send(this.styleText(`已整理：合并 ${r.categories} 个分类，净减 ${r.removed} 条，现在 ${r.after} 条自动记忆。`));
+            this._logger.info(`[cmd:memory] 手动整理 categories=${r.categories} removed=${r.removed} after=${r.after} | ${this.sessionTag(session)}`);
             return true;
         }
         // 保存

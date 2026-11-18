@@ -743,6 +743,131 @@ export class AiEngine {
   }
 
   /** 把一批消息归纳成一条记忆并写入对应作用域；返回写入结果或 null */
+  /** 解析会话对应的记忆作用域 */
+  private scopeForSession(session: any): { kind: "group" | "private"; id: string; scope: any } | null {
+    const kind: "group" | "private" = session?.guildId ? "group" : "private";
+    const id = String(session?.guildId || session?.userId || "");
+    if (!id) return null;
+    const scope = typeof (this.host as any).memoryScopeOf === "function"
+      ? (this.host as any).memoryScopeOf(session)
+      : { kind, id };
+    return { kind, id, scope };
+  }
+
+  /**
+   * [memory] summarize：立即触发一次归纳。
+   *
+   * 优先用「已被挤出、还没归纳」的待归纳桶；桶空时退化为最近上下文，
+   * 这样手动触发不会因为还没挤出消息而什么都不做。
+   */
+  async learnNow(session: any): Promise<{ ok: boolean; entries: number; text: string; reason: string }> {
+    const ctx = this.scopeForSession(session);
+    if (!ctx) return { ok: false, entries: 0, text: "", reason: "no-scope" };
+
+    const bucket = this.learnStore.get(ctx.kind, ctx.id);
+    // 先快照、成功后只移除这一次消费的消息：模型失败时不丢待归纳数据
+    let records: any[] = bucket.records.slice();
+    let source = "bucket";
+
+    if (!records.length) {
+      const platform = String(session?.platform || "onebot");
+      let state = this.state.peek(`${platform}:${ctx.id}`);
+      if (!state) {
+        for (const [key, value] of this.state.entries()) {
+          if (key.endsWith(`:${ctx.id}`)) {
+            state = value;
+            break;
+          }
+        }
+      }
+      const limit = Math.max(10, Math.min(40, Number(this.config.aiContextWindow) || 30));
+      records = state
+        ? state.records
+          .filter((record) => !record.command && String(record.text || "").trim())
+          .slice(-limit)
+        : [];
+      source = "context";
+    }
+
+    if (!records.length) return { ok: false, entries: 0, text: "", reason: "empty" };
+
+    const saved = await this.summarizeRecords(records, ctx.kind, ctx.scope, `manual-${source}`);
+    if (!saved) return { ok: false, entries: 0, text: "", reason: "none" };
+    if (source === "bucket") {
+      const consumed = new Set(records);
+      bucket.records = bucket.records.filter((record) => !consumed.has(record));
+    }
+    return { ok: true, entries: saved.entries || 0, text: saved.text, reason: source };
+  }
+
+  /**
+   * [memory] organize：立即整理一次。
+   *
+   * 把每个分类里 ≥2 条的自动记忆合并成 1 条；手动记忆不动。
+   */
+  async organizeNow(session: any): Promise<{
+    ok: boolean;
+    categories: number;
+    removed: number;
+    after: number;
+    reason: string;
+  }> {
+    const ctx = this.scopeForSession(session);
+    if (!ctx) return { ok: false, categories: 0, removed: 0, after: 0, reason: "no-scope" };
+
+    let autoBlocks: string[] = [];
+    try {
+      const content = await this.host.readMemoryFile(ctx.scope);
+      autoBlocks = splitMemoryBlocks(content)
+        .map((item) => item.text)
+        .filter((item) => isAutoMemoryBlock(item));
+    } catch {
+      autoBlocks = [];
+    }
+    if (!autoBlocks.length) {
+      return { ok: false, categories: 0, removed: 0, after: 0, reason: "empty" };
+    }
+
+    const byCategory = new Map<string, string[]>();
+    for (const block of autoBlocks) {
+      const category = memoryBlockCategory(block);
+      const list = byCategory.get(category) || [];
+      list.push(block);
+      byCategory.set(category, list);
+    }
+
+    const maxChars = Math.max(40, Number(this.config.memoryLearnConsolidateMaxChars) || 90);
+    let categories = 0;
+    let removed = 0;
+    for (const [category, list] of byCategory) {
+      if (list.length < 2) continue;
+      try {
+        const merged = await this.consolidateMemories(ctx.kind, list, "", maxChars, category);
+        if (!merged) continue;
+        await (this.host as any).commitAutoMemory(ctx.scope, {
+          add: merged,
+          remove: list,
+          label: AUTO_MEMORY_LABEL,
+          category,
+        });
+        categories += 1;
+        removed += list.length - 1;
+      } catch (error: any) {
+        this.host.logger?.warn?.(`[memory-organize] 压缩失败（${category}）: ${String(error)}`);
+      }
+    }
+
+    let after = autoBlocks.length - removed;
+    try {
+      const content = await this.host.readMemoryFile(ctx.scope);
+      after = splitMemoryBlocks(content)
+        .map((item) => item.text)
+        .filter((item) => isAutoMemoryBlock(item)).length;
+    } catch { /* ignore */ }
+
+    return { ok: true, categories, removed, after, reason: "manual" };
+  }
+
   private async summarizeRecords(
     records: any[],
     kind: "group" | "private",

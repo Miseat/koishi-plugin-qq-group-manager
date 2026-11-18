@@ -61,6 +61,8 @@ npm i @nestim/koishi-plugin-qq-group-manager
 | `[memory] list` | 列出最近 10 条记忆 |
 | `[memory] search 关键词` | 查询记忆（`query` / `find` 同义） |
 | `[memory] delete 关键词` | 删除含该关键词的记忆（`del` 同义） |
+| `[memory] summarize` | 立即触发一次归纳（优先用待归纳消息，没有就用最近上下文；`归纳` / `总结` 同义） |
+| `[memory] organize` | 立即整理自动记忆：同分类 ≥2 条合并成 1 条（`整理` 同义） |
 | `[ban] QQ [原因]` | 加入本群黑名单 |
 | `[unban] QQ [原因]` | 移出本群黑名单 |
 | `[banlist]` | 列出本群黑名单 |
